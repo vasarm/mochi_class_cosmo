@@ -58,5 +58,5 @@ setup(
     description='Python interface to the Cosmological Boltzmann code CLASS',
     url='http://www.class-code.net',
     cmdclass={'build_ext': build_ext},
-    ext_modules=[classy_ext]
+    ext_modules=[classy_ext],
 )

@@ -3772,6 +3772,7 @@ int array_hunt_ascending(
   return _SUCCESS_;
 }
 
+
 int array_smooth_Gaussian(double * x,
                           double * y,
                           double * ysmooth,

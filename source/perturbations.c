@@ -11267,6 +11267,8 @@ int perturbations_rsa_delta_and_theta(
     }
   }
 
+  /* update total delta and theta given rsa approximation results */
+
   ppw->delta_rho += ppw->pvecback[pba->index_bg_rho_g]*ppw->rsa_delta_g;
   ppw->delta_p += 1./3.*ppw->pvecback[pba->index_bg_rho_g]*ppw->rsa_delta_g;
   ppw->rho_plus_p_theta += 4./3.*ppw->pvecback[pba->index_bg_rho_g]*ppw->rsa_theta_g;
