@@ -98,6 +98,10 @@ int input_read_parameters_smg(
   char string1[_ARGUMENT_LENGTH_MAX_];
   char string2[_ARGUMENT_LENGTH_MAX_];
 
+  int input_verbose = 0;
+  class_read_int("input_verbose",input_verbose);
+
+
   pba->has_smg = _TRUE_;  //default is _FALSE_
 
   /** Main flag for the quasi-static approximation scheme */
@@ -346,8 +350,60 @@ int input_read_parameters_smg(
   // }
 
   /** re-assign shooting parameter (for no-tuning debug mode) */
+
+  // !=TODO Martin
+  // This is where we SET the tuning parameter(s)!
   if (pba->Omega_smg_debug == 0)
     class_read_double("shooting_parameter_smg",pba->parameters_smg[pba->tuning_index_smg]);
+    // If we want to shoot for M_plt as well
+    if (pba->M_pl_tuning_smg){
+      class_read_double("param_shoot_M_pl_smg",pba->parameters_smg[pba->tuning_index_2_smg]);
+    }
+  // !=TODO Martin
+  // If we use shifting method, then phi0 = 0.
+    class_call(parser_read_string(pfc,
+			  "gravity_submodel",
+			  &string1,
+			  &flag1,
+			  errmsg),
+	errmsg,
+	errmsg);
+    
+  if (strcmp(string1, "quintom_shift")==0 || strcmp(string1, "quintom_shift_alpha")==0 || strcmp(string1, "quintom_shift_extension")==0  || strcmp(string1, "quintom_shift_extension_alpha")==0){
+    double phi0_quintom, V0_quintom, beta_quintom, m2_quintom, mu_quintom, lambda_quintom, alpha_quintom;
+    phi0_quintom = pba->parameters_smg[pba->tuning_index_smg];
+    V0_quintom = pba->parameters_smg[0];
+    beta_quintom = pba->parameters_smg[1];
+    m2_quintom = pba->parameters_smg[2];
+    mu_quintom = pba->parameters_smg[3];
+    lambda_quintom = pba->parameters_smg[4];
+    alpha_quintom = pba->parameters_smg[5];
+    if (input_verbose >= 3){
+      printf(" = α: %g\n", alpha_quintom);
+      printf(" = Parameters before shift - V0_smg: %g, beta_smg: %g, m2_smg:%g, mu_smg: %g, lambda_smg: %g\n", V0_quintom, beta_quintom, m2_quintom, mu_quintom, lambda_quintom);
+    }
+
+    V0_quintom = V0_quintom + m2_quintom*pow(phi0_quintom, 2.)/2. + lambda_quintom *pow(phi0_quintom, 4.)/4.;
+    beta_quintom = m2_quintom*phi0_quintom + lambda_quintom * pow(phi0_quintom, 3.);
+    m2_quintom = m2_quintom + 3*lambda_quintom*pow(phi0_quintom, 2.0);
+    mu_quintom = lambda_quintom * phi0_quintom;
+
+    pba->parameters_smg[0] = V0_quintom;
+    pba->parameters_smg[1] = beta_quintom;
+    pba->parameters_smg[2] = m2_quintom;
+    pba->parameters_smg[3] = mu_quintom;
+    pba->parameters_smg[4] = lambda_quintom;
+    pba->parameters_smg[6] = 0.;
+    pba->phi_star_smg = pba->parameters_smg[pba->tuning_index_smg];
+    if (input_verbose >= 3){
+      printf(" = Parameters after shift - V0_smg: %g, beta_smg: %g, m2_smg:%g, mu_smg: %g, lambda_smg: %g\n", V0_quintom, beta_quintom, m2_quintom, mu_quintom, lambda_quintom);
+      printf(" = Finally changing phi0 from: %g ", pba->parameters_smg[pba->tuning_index_smg]);
+    }
+    pba->parameters_smg[pba->tuning_index_smg] = 0.;
+    if (input_verbose >= 3){
+      printf("to %g\n", pba->parameters_smg[pba->tuning_index_smg]);
+    }
+  }
 
   // test that the tuning is correct
   class_test(pba->tuning_index_smg >= pba->parameters_size_smg,

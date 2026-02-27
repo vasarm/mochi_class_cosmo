@@ -822,7 +822,185 @@ int gravity_models_gravity_properties_smg(
      class_test(pba->parameters_smg[2]<0.,errmsg,"In n-KGB, Rshift0>=0, or ICs for background can't be set.");
    }
   //end of nKGB
+    if (strcmp(string1,"quintom") == 0 || strcmp(string1,"Quintom") == 0) {
+      pba->gravity_model_smg = quintom;
+      pba->field_evolution_smg = _TRUE_;
+      pba->parameters_size_smg = 10;
+      pba->parameters_2_size_smg = 2;
+      flag2=_TRUE_;
 
+      double V0, beta, m2, mu, lambda, alpha, phi_s, xi, phi0, dphi0, beta_tilde, xi_tilde, eta_tilde;
+      pba->turn_quintom_extension_on_smg = 0;
+      beta = 0.;
+      mu = 0.;
+      beta_tilde = 0.;
+      xi_tilde=0.;
+
+      int flag_read_param=_FALSE_;
+      double M_pl_today_smg_temp;
+      
+
+
+      class_call(parser_read_string(pfc,"gravity_submodel",&string2,&flag3,errmsg), errmsg, errmsg);
+
+      // Assign phi0, dphi0 and V0
+      class_call(parser_read_double(pfc,"phi0_smg", &phi0, &flag_read_param, errmsg), errmsg, errmsg);
+      if (flag_read_param == _FALSE_) {
+        phi0 = 0.; // Default value
+      }
+      class_call(parser_read_double(pfc,"dphi0_smg", &dphi0, &flag_read_param, errmsg), errmsg, errmsg);
+      if (flag_read_param == _FALSE_){
+        dphi0 = 0.0;
+      }
+      class_call(parser_read_double(pfc,"V0_smg", &V0, &flag_read_param, errmsg), errmsg, errmsg);
+      if (flag_read_param == _FALSE_){
+        V0 = 1.;
+      }
+      class_call(parser_read_double(pfc,"alpha_smg", &alpha, &flag_read_param, errmsg), errmsg, errmsg);
+      if (flag_read_param == _FALSE_){
+        alpha = 1.;
+      }
+      class_call(parser_read_double(pfc,"phi_s_smg", &phi_s, &flag_read_param, errmsg), errmsg, errmsg);
+      if (flag_read_param == _FALSE_){
+        phi_s = 0.;
+      }
+
+      if(has_tuning_index_smg == _FALSE_){
+         pba->tuning_dxdy_guess_smg = 8;
+       }
+    // pba->tuning_index_smg = 8; //NB: Use phi0 for default tuning always!
+      if(has_dxdy_guess_smg == _FALSE_){
+         pba->tuning_dxdy_guess_smg = 1;
+      }
+
+      if (flag3 != _TRUE_){
+        class_read_list_of_doubles("parameters_smg",pba->parameters_smg,pba->parameters_size_smg);
+      }
+      else {
+        //a submodel is given
+
+        class_alloc(pba->parameters_smg, sizeof(double*)*pba->parameters_size_smg,pba->error_message);
+        class_alloc(pba->parameters_2_smg, sizeof(double*)*pba->parameters_2_size_smg,pba->error_message);
+         /*1) Quartic */
+         if (strcmp(string2,"quartic") == 0) {
+           class_read_double("beta_smg", beta);//input_params_quint[1];
+           class_read_double("m2_smg", m2);//input_params_quint[2];
+           class_read_double("mu_smg", mu);//input_params_quint[2];
+           class_read_double("lambda_smg", lambda);//input_params_quint[2];
+           class_read_double("xi_smg", xi);//input_params_quint[4];
+           class_read_double("phi_s_smg", phi_s);//input_params_quint[4];
+         }
+         else if (strcmp(string2,"quintom_shift") == 0) {
+           class_test(pba->tuning_index_smg!=8, errmsg, "Check that tuning index is correct. If using submodel: 'quintom_shift' then the tuning index must be phi0.");
+           class_read_double("m2_smg", m2);//input_params_quint[2];
+           class_read_double("lambda_smg", lambda);//input_params_quint[2];
+           class_read_double("xi_smg", xi);//input_params_quint[4];
+           class_test(xi>=0, errmsg, "Currently only xi < 0 is supported. Current value is %g.\n", xi);
+          
+          // class_read_double("phi_s_smg", phi_s);//input_params_quint[4];
+        }
+        else if (strcmp(string2,"quintom_shift_alpha") == 0) {
+          class_test(pba->tuning_index_smg!=8, errmsg, "Check that tuning index is correct. If using submodel: 'quintom_shift' then the tuning index must be phi0.");
+          class_read_double("m2_smg", m2);//input_params_quint[2];
+          class_read_double("lambda_smg", lambda);//input_params_quint[2];
+          class_read_double("xi_smg", xi);//input_params_quint[4];
+          class_call(parser_read_double(pfc, "M_pl_today_smg", &M_pl_today_smg_temp, &flag_read_param, errmsg), errmsg, errmsg);
+        if (flag_read_param == _FALSE_) {
+          class_stop(errmsg, "'M_pl_today_smg' is not defined, but you want to fit alpha. Define M_pl_today_smg = -1"); // Default value
+        }
+        class_test(xi>=0, errmsg, "Currently only xi < 0 is supported. Current value is %g.\n", xi);
+        pba->M_pl_tuning_smg = _TRUE_;
+        pba->tuning_index_2_smg = 5;
+        pba->M_pl_today_smg = 1.;
+      }
+      else if (strcmp(string2,"quintom_shift_extension") == 0) {
+        class_test(pba->tuning_index_smg!=8, errmsg, "Check that tuning index is correct. If using submodel: 'quintom_shift' then the tuning index must be phi0.");
+        class_read_double("m2_smg", m2);//input_params_quint[2];
+        class_read_double("lambda_smg", lambda);//input_params_quint[2];
+        class_read_double("xi_smg", xi);//input_params_quint[4];
+        class_call(parser_read_double(pfc, "beta_tilde_smg", &beta_tilde, &flag_read_param, errmsg), errmsg, errmsg);
+        if (flag_read_param == _FALSE_) {
+          beta_tilde = 0.; // Default value
+        }
+        class_call(parser_read_double(pfc, "xi_tilde_smg", &xi_tilde, &flag_read_param, errmsg), errmsg, errmsg);
+        if (flag_read_param == _FALSE_) {
+          xi_tilde = 0.; // Default value
+        }
+       
+        class_call(parser_read_string(pfc, "turn_quintom_extension_on_smg", &string3, &flag3, errmsg), errmsg, errmsg);
+        if((strstr(string3,"y") != NULL) || (strstr(string3,"Y") != NULL)){
+          pba->turn_quintom_extension_on_smg = 1;
+        }
+        else{
+          pba->turn_quintom_extension_on_smg = 0;
+        }
+      }
+      else if (strcmp(string2,"quintom_shift_extension_alpha") == 0) {
+        class_test(pba->tuning_index_smg!=8, errmsg, "Check that tuning index is correct. If using submodel: 'quintom_shift' then the tuning index must be phi0.");
+        class_read_double("m2_smg", m2);//input_params_quint[2];
+        class_read_double("lambda_smg", lambda);//input_params_quint[2];
+        class_read_double("xi_smg", xi);//input_params_quint[4];
+
+        class_call(parser_read_double(pfc, "M_pl_today_smg", &M_pl_today_smg_temp, &flag_read_param, errmsg), errmsg, errmsg);
+        if (flag_read_param == _FALSE_) {
+          class_stop(errmsg, "'M_pl_today_smg' is not defined, but you want to fit alpha. Define M_pl_today_smg = -1"); // Default value
+        }
+        class_call(parser_read_double(pfc, "beta_tilde_smg", &beta_tilde, &flag_read_param, errmsg), errmsg, errmsg);
+        if (flag_read_param == _FALSE_) {
+          beta_tilde = 0.; // Default value
+          class_call(parser_read_double(pfc, "eta_tilde_smg", &eta_tilde, &flag_read_param, errmsg), errmsg, errmsg);
+          if (flag_read_param == _TRUE_) {
+            beta_tilde = eta_tilde/(1-eta_tilde+1.e-15); // Default value
+          }
+        }
+        class_call(parser_read_double(pfc, "xi_tilde_smg", &xi_tilde, &flag_read_param, errmsg), errmsg, errmsg);
+        if (flag_read_param == _FALSE_) {
+          xi_tilde = 0.; // Default value
+        }
+        class_test(xi>=0, errmsg, "Currently only xi < 0 is supported. Current value is %g.\n", xi);
+
+        pba->M_pl_tuning_smg = _TRUE_;
+        pba->tuning_index_2_smg = 5;
+        pba->M_pl_today_smg = 1.;
+
+        class_call(parser_read_string(pfc, "turn_quintom_extension_on_smg", &string3, &flag3, errmsg), errmsg, errmsg);
+        if((strstr(string3,"y") != NULL) || (strstr(string3,"Y") != NULL)){
+          pba->turn_quintom_extension_on_smg = 1;
+        }
+        else{
+          class_stop(errmsg, "'turn_quintom_extension_on_smg' is 0 but extension model is used."); 
+        }
+      }
+
+       else {
+             class_test(flag3 == _TRUE_,
+        errmsg,
+        "Quintic: you specified a gravity_submodel that could not be identified. \n Options are: quartic, quintom_shift");
+       };
+
+       /* Set parameters for submodels */
+       pba->parameters_smg[0] = V0;
+       pba->parameters_smg[1] = beta;
+       pba->parameters_smg[2] = m2;
+       pba->parameters_smg[3] = mu;
+       pba->parameters_smg[4] = lambda;
+       pba->parameters_smg[5] = alpha;
+       pba->parameters_smg[6] = phi_s;
+       pba->parameters_smg[7] = xi;
+       pba->parameters_smg[8] = phi0;
+       pba->parameters_smg[9] = dphi0;
+
+       pba->parameters_2_smg[0] = beta_tilde;
+       pba->parameters_2_smg[1] = xi_tilde;
+
+      //  printf("Model parameters 1: V0: %g beta: %g m2: %g mu: %g lambda: %g alpha: %g phi_s: %g xi: %g phi0: %g dphi0: %g\n", V0, beta, m2, mu, lambda, alpha, phi_s, xi, phi0, dphi0);
+      //  printf("Model parameters 2: beta_tilde: %g xi_tilde: %g\n", beta_tilde, xi_tilde);
+    }
+
+    
+    
+    
+  }
   class_test(flag2==_FALSE_,
              errmsg,
              "could not identify gravity_theory value, check that it is one of 'propto_omega', 'propto_scale', 'constant_alphas', 'eft_alphas_power_law', 'eft_gammas_power_law', 'eft_gammas_exponential', 'external_alphas', 'stable_params', 'brans_dicke', 'galileon', 'nKGB', 'quintessence_monomial', 'quintessence_tracker', 'alpha_attractor_canonical' ...");
@@ -1290,6 +1468,130 @@ int gravity_models_get_Gs_smg(
 
   }
 
+  else if(pba->gravity_model_smg == quintom){
+
+    /* Quintessence:
+     * - V is a quadratic potential: 
+     * F = 1 + ξ χ^2
+     * V = v_0 + β χ + m^2 χ^2  + λ χ^4
+     * v_0 is given in V0/M_p^2 H_0^2
+     */
+
+    double v0 = pba->parameters_smg[0];
+    double beta = pba->parameters_smg[1];
+    double m2 = pba->parameters_smg[2];
+    double mu = pba->parameters_smg[3];
+    double lambda = pba->parameters_smg[4];
+    
+    double H0 = pba->H0;
+    double V = (v0 + beta*phi + 0.5 * m2 * pow(phi, 2.) + mu * pow(phi, 3.) +  0.25 * lambda * pow(phi, 4.))*pow(H0, 2.);
+    double dV = (beta +  m2 * phi + 3.*mu * pow(phi, 2.) + lambda * pow(phi, 3.))*pow(H0, 2.);
+    double ddV = (m2 + 6. * mu * phi + 3.*lambda * pow(phi, 2.))*pow(H0, 2.);
+    // printf("phi: %g, dphi: %g, V: %g\n", phi, phi_prime/a, V/pow(H0, 2));
+    
+    double alpha = pba->parameters_smg[5];
+    double phi_s = pba->parameters_smg[6];
+    double xi = pba->parameters_smg[7];
+
+    double beta_tilde = pba->parameters_2_smg[0];
+    double xi_tilde = pba->parameters_2_smg[1];
+
+    // If xi (pba->parameters_smg[5]) = 0 then alpha (pba->parameters_smg[4]) = 1
+    // This happens because F=const requires alpha = 1
+    double G4 = 0.5 * alpha *(1 + pow(phi-phi_s, 2.)*xi);
+    double deltaG4 =  G4-0.5;
+    
+    double dG4 = alpha * xi*(phi-phi_s);
+    double ddG4 = alpha * xi;
+    
+    // Debug initial conditions
+    // if (a==1.e-14){
+    //   printf("alpha: %g, phi: %g, phi_s: %g, xi: %g\n", alpha, phi, phi_s, xi);
+    //   printf("G4: %g, DeltaG4: %g, G4_phi: %g, G4_phiphi: %g\n", G4, deltaG4, dG4, ddG4);
+    // }
+
+    // 2X = -d_mu phi d^mu phi
+    double F = alpha * (1 + pow(phi-phi_s, 2.) * xi);
+    double dF = 2. * alpha * xi*(phi-phi_s);
+    double ddF = 2. * alpha * xi;
+    double F2, dF2, dF3;  
+
+    double F_tilde;
+    double dF_tilde;
+    double ddF_tilde;
+    double F_tilde2, dF_tilde2, dF_tilde3;
+    double ddF_tilde2;
+
+    double K, dK, ddK;
+    // Derivatives of third order and higher are zero
+    if (pba->turn_quintom_extension_on_smg){
+      F_tilde =  (beta_tilde + pow(phi-phi_s, 2.) * xi_tilde);
+      dF_tilde = 2. * (phi-phi_s) * xi_tilde;
+      ddF_tilde = 2. * xi_tilde;
+      // printf("Ft: %g, %g, %g, %g, %g, %g, %g\n", F_tilde, dF_tilde, ddF_tilde, F_tilde2, dF_tilde2, dF_tilde3, ddF_tilde2);
+      F2 = pow(F, 2.);
+      dF2 = pow(dF, 2.);
+      dF3 = pow(dF, 3.);
+      F_tilde2 = pow(F_tilde, 2.);
+      dF_tilde2 = pow(dF_tilde, 2.);
+      dF_tilde3 = pow(dF_tilde, 3.);
+      ddF_tilde2 = pow(ddF_tilde, 2.);
+
+      K = 1. + 3./2. *(F * dF_tilde2 - 2*dF*F_tilde*dF_tilde-F*dF2)/(F2+F_tilde2);
+      dK =  3./2. * (
+          2.*(F*dF + F_tilde*dF_tilde)*(
+            2*F_tilde*dF*dF_tilde +
+            F*(dF2-dF_tilde2)
+          ) -
+          (F2 + F_tilde2)*(
+            dF3 + 2 * dF_tilde * (F_tilde * ddF - F*ddF_tilde) +
+            dF * (dF_tilde2 + 2*F*ddF + 2*F_tilde*ddF_tilde)
+          )
+        ) / (pow(F2 + F_tilde2, 2.));
+
+      
+      ddK = 3./2. * (
+          -8. * pow(F * dF + F_tilde * dF_tilde, 2.) * (2 * F_tilde * dF * dF_tilde + F * (dF2 - dF_tilde2)) + 
+          2. * (F2 + F_tilde2) * (
+              2. * F_tilde * dF * dF_tilde +
+              F * (dF2 - dF_tilde2)
+            )*(
+              dF2 + 
+              dF_tilde2 +
+              F * ddF + 
+              F_tilde * ddF_tilde
+            ) - 
+          pow(F2+F_tilde2, 2.) * (
+            ddF * (5 * dF2 + 3 * dF_tilde2 + 2 * F * ddF) +
+            2 * (dF*dF_tilde + 2 * F_tilde * ddF) * ddF_tilde -
+            2 * F *ddF_tilde2
+          ) +
+          4. * (F2+F_tilde2) * (F*dF + F_tilde * dF_tilde) * (
+            dF3 + 
+            2*dF_tilde*(F_tilde*ddF - F * ddF_tilde) + 
+            dF*(dF_tilde2 + 2*F*ddF + 2*F_tilde*ddF_tilde)
+          )
+        ) / (pow(F2+F_tilde2, 3.));
+    }
+    else {
+      K = 1.;
+      dK = 0.;
+      ddK = 0.;
+    }
+    
+    pgf->G2 = K * X - V;
+    pgf->G2_X = K; // Derivative respect to X
+    pgf->G2_Xphi = dK;
+    pgf->G2_Xphiphi = ddK;
+    pgf->G2_phi = dK*X-dV; // Derivative respect to phi
+    pgf->G2_phiphi = ddK*X-ddV; // Second derivative respect to phi
+
+    pgf->DG4 = deltaG4; // DG4 = G4 - 1/2
+    pgf->G4 = G4;
+    pgf->G4_phi = dG4; // Derivative respect to phi
+    pgf->G4_phiphi = ddG4; // Second derivative respect to phi
+    // printf("a: %g, X: %g, V: %g, G2: %g, dG2: %g, ddG2: %g, G4: %g, dG4: %g, ddG4: %g\n", a, X, V, X-V, -dV, -ddV, G4, dG4, ddG4);
+  }
   return _SUCCESS_;
 }
 
@@ -1806,6 +2108,11 @@ int gravity_models_initial_conditions_smg(
 			}
 	    break;
 
+      case quintom:
+			pvecback_integration[pba->index_bi_phi_smg] = pba->parameters_smg[8];
+			pvecback_integration[pba->index_bi_phi_prime_smg] = pba->parameters_smg[9];
+			break;
+
 	  case propto_omega:
 			pvecback_integration[pba->index_bi_delta_M_pl_smg] = pba->parameters_2_smg[4]-1.;
 			break;
@@ -1923,6 +2230,14 @@ int gravity_models_print_stdout_smg(
      printf("Modified gravity: Kinetic Gravity Braiding with K=-X and G=1/n g^(2n-1)/2 * X^n with parameters: \n");
      printf(" -> g = %g, n = %g, phi_ini = 0.0, smg density fraction from shift charge term = %g. \n",
 	    pba->parameters_smg[0],pba->parameters_smg[1],pba->parameters_smg[2]);
+    break;
+
+    case quintom:
+      printf("Modified gravity: Quintom with parameters: \n");
+      printf("%g %g %i\n", pba->parameters_2_smg[0], pba->parameters_2_smg[1], pba->turn_quintom_extension_on_smg);
+
+      printf(" -> ϕ_ini = %g (ϕ_0 = %g), ϕ'_ini = %g\n -> v0 = %g, β = %g, m^2 = %g, μ = %g,  λ = %g, α = %g, ϕ* = %g, ξ = %g, ~β = %g, ~ξ = %g, Extension on: %i\n",
+	      pba->parameters_smg[8], pba->phi_0_smg, pba->parameters_smg[9], pba->parameters_smg[0], pba->parameters_smg[1], pba->parameters_smg[2], pba->parameters_smg[3], pba->parameters_smg[4], pba->parameters_smg[5], pba->parameters_smg[6], pba->parameters_smg[7], pba->parameters_2_smg[0], pba->parameters_2_smg[1], pba->turn_quintom_extension_on_smg);
     break;
 
     case propto_omega:

@@ -25,7 +25,8 @@ enum gravity_model {propto_omega, propto_scale,
     galileon, nkgb,
     brans_dicke,
     quintessence_monomial, quintessence_tracker,
-    alpha_attractor_canonical
+    alpha_attractor_canonical,
+    quintom
 };
 
 /** parameterized expansion, only for non-self consistent Horndeski theories (_smg) */
@@ -222,6 +223,11 @@ struct background
   double M_pl_today_smg;
 
   short output_background_smg; /**< flag regulating the amount of information printed onbackground.dat output */
+
+  // !=TODO Martin - Quintom extra parameters
+  double phi_star_smg;
+  int turn_quintom_extension_on_smg;
+
 
   /** @name - related parameters */
 

@@ -415,6 +415,7 @@ int input_read_from_file(struct file_content * pfc,
 
   /** -- Special setting of parameter, before anything else: did shooting fail? */
   pba->shooting_failed = _FALSE_;
+  int shooting_failed;
 
   /** Find out if shooting necessary and, eventually, shoot and initialize
       read parameters */
@@ -424,13 +425,18 @@ int input_read_from_file(struct file_content * pfc,
                             errmsg),
              errmsg,
              errmsg);
+  
+  shooting_failed = pba->shooting_failed;
 
   /** Update structs with input that is potentially updated after shooting */
-  class_call(input_read_parameters(pfc,ppr,pba,pth,ppt,ptr,ppm,phr,pfo,ple,psd,pop,
-                                    errmsg),
-              errmsg,
-              errmsg);
-
+  class_call(
+    input_read_parameters(pfc,ppr,pba,pth,ppt,ptr,ppm,phr,pfo,ple,psd,pop,errmsg),
+    errmsg,
+    errmsg
+  );
+  // != Martin: Must set shooting failed again
+  pba->shooting_failed = shooting_failed;
+  
   if (has_shooting == _TRUE_ && pba->shooting_failed == _TRUE_) {
     // Shooting failed, but error must be thrown in background in order to trigger a
     // runtime error, so here we skip the rest and go straight to background
@@ -657,9 +663,37 @@ int input_shooting(struct file_content * pfc,
          corresponding unknown parameter */
       strcpy(fzw.fc.name[fzw.unknown_parameters_index[counter]],unknown_namestrings[index_target]);
     }
+    
+    char string_submodel[_ARGUMENT_LENGTH_MAX_];
+    parser_read_string(&fzw.fc,"gravity_submodel", &string_submodel, &flag1, errmsg);
 
+    if (strcmp(string_submodel, "quintom_shift")==0 || strcmp(string_submodel, "quintom_shift_alpha")==0 || strcmp(string_submodel, "quintom_shift_extension")==0 || strcmp(string_submodel, "quintom_shift_extension_alpha")==0 ){
+      /** If quintom then have defined multidimensional shooting */
+      class_alloc(x_inout,
+                  sizeof(double)*unknown_parameters_size,
+                  errmsg);
+      class_call_try(input_find_root_quintom(
+          x_inout, &fevals, unknown_parameters_size, ppr->tol_shooting_deltax_rel, ppr->tol_shooting_deltaF, &fzw, input_verbose, errmsg
+        ),
+        errmsg, pba->shooting_error, shooting_failed=_TRUE_
+      );
+      for (counter = 0; counter < unknown_parameters_size; counter++){
+        class_sprintf(fzw.fc.value[fzw.unknown_parameters_index[counter]],
+                "%.20e",x_inout[counter]);
+        if (input_verbose > 0) {
+          if (shooting_failed == _FALSE_){
+            printf(" -> found '%s = %s'\n",
+                    fzw.fc.name[fzw.unknown_parameters_index[counter]],
+                    fzw.fc.value[fzw.unknown_parameters_index[counter]]);
+          }
+          else{
+            printf("Shooting failed! Aborting...\n");
+          }
+        }
+      }
+    }
     /** If there is only one parameter, we use a more efficient Newton method for 1D cases */
-    if (unknown_parameters_size == 1){
+    else if (unknown_parameters_size == 1){
 
       /* We can do 1 dimensional root finding */
       if (input_verbose > 0) {
@@ -917,6 +951,7 @@ int input_needs_shooting_for_target(struct file_content * pfc,
         *needs_shooting = _FALSE_;
       break;
     case M_pl_today_smg:
+  
     default:
       /* Default is no additional checks */
       *needs_shooting = _TRUE_;
@@ -1540,23 +1575,29 @@ int input_try_unknown_parameters(double * unknown_parameter,
     case Omega_smg:
       output[i] = ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_rho_smg]/pow(ba.H0,2) - ba.Omega0_smg;
       if (input_verbose > 2)
-        printf(" param[%i] = %e, Omega_smg = %.3e, %.3e, target = %.2e \n",ba.tuning_index_smg,
+        printf(" param[%i] = %e, Omega_smg = %.3e, %.3e, target = %.2e \n",
+          ba.tuning_index_smg,
           ba.parameters_smg[ba.tuning_index_smg],
-          ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_rho_smg]
-              /ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_rho_crit], ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_rho_smg]
-              /pow(ba.H0,2),output[i]);
+          ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_rho_smg]/ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_rho_crit],
+          ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_rho_smg]/pow(ba.H0,2),
+          output[i]
+        );
       break;
     case M_pl_today_smg:
       output[i] = ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_M2_smg] - ba.M_pl_today_smg;
       if (input_verbose > 2)
-        printf("M_pl = %e, want %e, param=%e\n",
-         ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_M2_smg],
-         ba.M_pl_today_smg,
-         ba.parameters_smg[ba.tuning_index_2_smg]
+        printf(" param[%i] = %e, M_pl = %e, want %e, target=%.2e \n",
+          ba.tuning_index_2_smg,
+          ba.parameters_smg[ba.tuning_index_2_smg],
+          ba.background_table[(ba.bt_size-1)*ba.bg_size+ba.index_bg_M2_smg],
+          ba.M_pl_today_smg,
+          output[i]
         );
     }
   }
-
+  if (input_verbose >= 2){
+    printf(" = H0 (input): %g, H0 (computation):%g ΔH = %g, ΔH/H = %g\n\n", ba.H0, ba.background_table[(ba.bt_size-1)*ba.bg_size + ba.index_bg_H], ba.H0 - ba.background_table[(ba.bt_size-1)*ba.bg_size + ba.index_bg_H], (ba.H0 - ba.background_table[(ba.bt_size-1)*ba.bg_size + ba.index_bg_H])/ba.H0);
+  }
   /** Free structures */
   if (pfzw->required_computation_stage >= cs_spectra){
     class_call(harmonic_free(&hr), hr.error_message, errmsg);
@@ -1737,6 +1778,7 @@ int input_read_parameters(struct file_content * pfc,
    * This function is exclusively for those parameters, NOT
    *  related to any physical species
    * */
+
   class_call(input_read_parameters_general(pfc,pba,pth,ppt,pfo,psd,
                                            errmsg),
              errmsg,

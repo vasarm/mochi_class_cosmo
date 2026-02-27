@@ -13,4 +13,6 @@
 #include "perturbations_smg.h"
 #include "fourier_smg.h"
 
+#include "model_quintom_smg.h" // Coupled scalar field
+
 #endif

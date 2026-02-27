@@ -64,45 +64,45 @@ int background_gravity_functions_smg(
 
   if (pba->field_evolution_smg == _TRUE_) {
 
-		/* Define local variables */
-		double x,f,df;
+    /* Define local variables */
+    double x,f,df;
     int n, n_max=100;
-		double H;
+    double H;
 
-		/* Get phi and phi_prime from the integrator */
-		pvecback[pba->index_bg_phi_smg] = pvecback_B[pba->index_bi_phi_smg];
+    /* Get phi and phi_prime from the integrator */
+    pvecback[pba->index_bg_phi_smg] = pvecback_B[pba->index_bi_phi_smg];
     pvecback[pba->index_bg_phi_prime_smg] = pvecback_B[pba->index_bi_phi_prime_smg];
 
-		/* declare G functions and set defaults */
-		struct G_functions_and_derivs gf = DEFAULT_G_FUNCTIONS_AND_DERIVS;
+    /* declare G functions and set defaults */
+    struct G_functions_and_derivs gf = DEFAULT_G_FUNCTIONS_AND_DERIVS;
 
-		/* update G functions and derivatives */
- 	  class_call(gravity_models_get_Gs_smg(pba, a, pvecback_B, &gf),
- 	    pba->error_message,
- 	    pba->error_message
- 	  );
+    /* update G functions and derivatives */
+    class_call(gravity_models_get_Gs_smg(pba, a, pvecback_B, &gf),
+        pba->error_message,
+ 	pba->error_message
+    );
 
-		/* get Es functions. Notation:
-		* E0 + E1 H + E3 H^3 = E2 H^2
-		*/
-		class_call(gravity_functions_Es_from_Gs_smg(pba, a, pvecback_B, pvecback, &gf),
-			pba->error_message,
-			pba->error_message
-		);
+	/* get Es functions. Notation:
+	* E0 + E1 H + E3 H^3 = E2 H^2
+	*/
+	class_call(gravity_functions_Es_from_Gs_smg(pba, a, pvecback_B, pvecback, &gf),
+		pba->error_message,
+		pba->error_message
+	);
 
-		double E0 = pvecback[pba->index_bg_E0_smg];
-		double E1 = pvecback[pba->index_bg_E1_smg];
-		double E2 = pvecback[pba->index_bg_E2_smg];
-		double E3 = pvecback[pba->index_bg_E3_smg];
+	double E0 = pvecback[pba->index_bg_E0_smg];
+	double E1 = pvecback[pba->index_bg_E1_smg];
+	double E2 = pvecback[pba->index_bg_E2_smg];
+	double E3 = pvecback[pba->index_bg_E3_smg];
 
-		class_test(E3*pow(E0,1./2.) > 1e-10 && pba->initial_conditions_set_smg == _FALSE_,
-							 pba->error_message,
-							 "E3=%e is large in Friedmann constraint when setting ICs ",  E3);
+	class_test(E3*pow(E0,1./2.) > 1e-10 && pba->initial_conditions_set_smg == _FALSE_,
+						 pba->error_message,
+						 "E3=%e is large in Friedmann constraint when setting ICs ",  E3);
 
-		/* get Hubble, either solving the cubic Friedmann
-		* equation or from the integrator.
-		*/
-		if ((pba->hubble_evolution == _FALSE_) || (pba->initial_conditions_set_smg == _FALSE_)) {
+	/* get Hubble, either solving the cubic Friedmann
+	* equation or from the integrator.
+	*/
+	if ((pba->hubble_evolution == _FALSE_) || (pba->initial_conditions_set_smg == _FALSE_)) {
       /* Use Newton's method to solve the cubic Friedmann equation */
       x = sqrt(E0);
       f = E3*x*x*x -E2*x*x + E1*x + E0;
@@ -178,18 +178,17 @@ int background_gravity_functions_smg(
 	}
 	// end of if pba->field_evolution_smg
   else{
+    double rho_tot = pvecback[pba->index_bg_rho_tot_wo_smg];
+    double p_tot = pvecback[pba->index_bg_p_tot_wo_smg];
 
-		double rho_tot = pvecback[pba->index_bg_rho_tot_wo_smg];
-	  double p_tot = pvecback[pba->index_bg_p_tot_wo_smg];
-
-		/* get background parametrizations. */
+    /* get background parametrizations. */
 		class_call(gravity_models_get_back_par_smg(pba, a, pvecback, pvecback_B),
  	    pba->error_message,
  	    pba->error_message
  	  );
 
-		/* add _smg to rho_tot */
-		rho_tot += pvecback[pba->index_bg_rho_smg];
+    /* add _smg to rho_tot */
+    rho_tot += pvecback[pba->index_bg_rho_smg];
     p_tot += pvecback[pba->index_bg_p_smg];
 
     pvecback[pba->index_bg_H] = sqrt(rho_tot-pba->K/a/a);

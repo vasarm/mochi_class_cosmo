@@ -120,6 +120,7 @@ cdef extern from "class.h":
         double H_eq
         double z_eq
         double tau_eq
+        double phi_star_smg
 
     cdef struct thermodynamics:
         short is_allocated

@@ -590,6 +590,7 @@ cdef class Class:
         if "background" in level:
             if background_init(&(self.pr), &(self.ba)) == _FAILURE_:
                 self.struct_cleanup()
+                # print(self.ba.error_message) !=TODO Martin: If want classy to print error messages
                 raise CosmoComputationError(self.ba.error_message)
             self.ncp.add("background")
 
@@ -4335,6 +4336,10 @@ cdef class Class:
                 value = self.__MontePython_ask_for_array_component(name, self.ba.parameters_2_smg, self.ba.parameters_2_size_smg)
             elif name == 'tuning_parameter':
                 value = self.ba.parameters_smg[self.ba.tuning_index_smg]
+            elif name == 'phi_star_smg':
+                value = self.ba.phi_star_smg
+            elif name == 'alpha_smg': # !=TODO Martin: Change to additional parameter 
+                value = self.ba.parameters_smg[5]
             else:
                 raise CosmoSevereError("%s was not recognized as a derived parameter" % name)
             derived[name] = value

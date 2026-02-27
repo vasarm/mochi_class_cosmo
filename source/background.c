@@ -838,14 +838,12 @@ int background_init(
                     ) {
 
   /** Summary: */
-
   /** - write class version */
   if (pba->background_verbose > 0) {
     // _smg
     printf("Running hi_class version %s (CLASS version %s)\n",_HI_CLASS_VERSION_, _VERSION_);
     printf("Computing background\n");
   }
-
   /** - if shooting failed during input, catch the error here */
   class_test(pba->shooting_failed == _TRUE_,
              pba->error_message,
