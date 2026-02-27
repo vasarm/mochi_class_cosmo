@@ -79,8 +79,13 @@ int background_gravity_functions_smg(
     /* update G functions and derivatives */
     class_call(gravity_models_get_Gs_smg(pba, a, pvecback_B, &gf),
         pba->error_message,
- 	pba->error_message
+ 		pba->error_message
     );
+
+	// != Martin: If using Quintom model, then M_pl_today_smg is equal to locally measured gravitational coupling
+	if (pba->gravity_model_smg==quintom){
+		pba->M_pl_today_smg = (gf.G4*gf.G2_X + 4. * pow(gf.G4_phi, 2.))/(gf.G4*gf.G2_X + 3. * pow(gf.G4_phi, 2.));
+	}
 
 	/* get Es functions. Notation:
 	* E0 + E1 H + E3 H^3 = E2 H^2
