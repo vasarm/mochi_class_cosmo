@@ -22,7 +22,7 @@ vpath .base build
 CC       = gcc-14
 #CC       = icc
 #CC       = pgcc
-CPP      = g++-14 --std=c++11 -fpermissive -Wno-write-strings
+CPP      = g++ --std=c++11 -fpermissive -Wno-write-strings
 
 # your tool for creating static libraries:
 AR        = ar rv
