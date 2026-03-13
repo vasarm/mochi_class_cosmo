@@ -2,6 +2,143 @@
 
 
 /**
+ * Scan the boundary of [phi_low,phi_high] x [alpha_low,alpha_high], compute the winding
+ * number of the residual vector field, and track the boundary point closest to zero.
+ *
+ * @param phi_low,phi_high   phi interval bounds
+ * @param alpha_low,alpha_high alpha interval bounds
+ * @param N_phi,N_alpha      lattice sizes along each axis (must be >= 2)
+ * @param pfzw               fzerofun workspace
+ * @param fevals             running function-evaluation counter (incremented in place)
+ * @param root_loc           in/out: (phi,alpha) of the current best guess (updated if boundary improves it)
+ * @param root_measure       in/out: |F|^2 of the current best guess (updated in place)
+ * @param winding_number output: |winding number| / (2*pi)
+ * @param errmsg             error message buffer
+ */
+static int compute_winding_number_2d(
+    struct fzerofun_workspace *pfzw,
+    double phi_low, double phi_high,
+    double alpha_low, double alpha_high,
+    int N_phi, int N_alpha,
+    int *fevals,
+    double root_loc[2], double *root_measure,
+    double *winding_number,
+    ErrorMsg errmsg)
+{
+  int winding_N = 2 * (N_alpha + N_phi) - 4;
+  double winding_boundary_F[winding_N][2];
+  double step_phi   = (phi_high   - phi_low)   / (N_phi   - 1);
+  double step_alpha = (alpha_high - alpha_low) / (N_alpha - 1);
+  int idx = 0;
+
+  double xt[2], root_measure_local;
+
+  /* Bottom edge: alpha_low, phi low -> high */
+  xt[1] = alpha_low;
+  for (int i = 0; i < N_phi; i++){
+    xt[0] = phi_low + i * step_phi;
+    input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[idx], errmsg);
+    root_measure_local = pow(winding_boundary_F[idx][0], 2.) + pow(winding_boundary_F[idx][1], 2.);
+    if (root_measure_local < *root_measure){
+      *root_measure = root_measure_local;
+      root_loc[0] = xt[0];
+      root_loc[1] = xt[1];
+    }
+    idx++; (*fevals)++;
+  }
+
+  /* Right edge: phi_high, alpha low -> high */
+  xt[0] = phi_high;
+  for (int i = 1; i < N_alpha; i++){
+    xt[1] = alpha_low + i * step_alpha;
+    input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[idx], errmsg);
+    root_measure_local = pow(winding_boundary_F[idx][0], 2.) + pow(winding_boundary_F[idx][1], 2.);
+    if (root_measure_local < *root_measure){
+      *root_measure = root_measure_local;
+      root_loc[0] = xt[0];
+      root_loc[1] = xt[1];
+    }
+    idx++; (*fevals)++;
+  }
+
+  /* Top edge: alpha_high, phi high -> low */
+  xt[1] = alpha_high;
+  for (int i = 1; i < N_phi; i++){
+    xt[0] = phi_high - i * step_phi;
+    input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[idx], errmsg);
+    root_measure_local = pow(winding_boundary_F[idx][0], 2.) + pow(winding_boundary_F[idx][1], 2.);
+    if (root_measure_local < *root_measure){
+      *root_measure = root_measure_local;
+      root_loc[0] = xt[0];
+      root_loc[1] = xt[1];
+    }
+    idx++; (*fevals)++;
+  }
+
+  /* Left edge: phi_low, alpha high -> low (skipping corners already covered) */
+  xt[0] = phi_low;
+  for (int i = 1; i < N_alpha - 1; i++){
+    xt[1] = alpha_high - i * step_alpha;
+    input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[idx], errmsg);
+    root_measure_local = pow(winding_boundary_F[idx][0], 2.) + pow(winding_boundary_F[idx][1], 2.);
+    if (root_measure_local < *root_measure){
+      *root_measure = root_measure_local;
+      root_loc[0] = xt[0];
+      root_loc[1] = xt[1];
+    }
+    idx++; (*fevals)++;
+  }
+
+  /* Compute winding number from boundary samples */
+  double winding_number_integral = 0.;
+  for (int i = 0; i < winding_N; i++){
+    int ip = (i + 1) % winding_N;
+    double cross = winding_boundary_F[i][0] * winding_boundary_F[ip][1] - winding_boundary_F[i][1] * winding_boundary_F[ip][0];
+    double dot   = winding_boundary_F[i][0] * winding_boundary_F[ip][0] + winding_boundary_F[i][1] * winding_boundary_F[ip][1];
+    winding_number_integral += atan2(cross, dot);
+  }
+  *winding_number = fabs(winding_number_integral) / (2. * _PI_);
+  return _SUCCESS_;
+}
+
+/**
+ * Coarse-grain interior scan: evaluate F on a (N_phi x N_alpha) interior grid
+ * (skipping the boundary) and update root_loc/root_measure if a closer-to-zero
+ * point is found.
+ */
+static int find_coarse_root_2d(
+    struct fzerofun_workspace *pfzw,
+    double phi_low, double phi_high,
+    double alpha_low, double alpha_high,
+    int N_phi, int N_alpha,
+    int *fevals,
+    double root_loc[2], double *root_measure,
+    ErrorMsg errmsg){
+  
+  double step_phi   = (phi_high   - phi_low)   / (N_phi   - 1);
+  double step_alpha = (alpha_high - alpha_low) / (N_alpha - 1);
+  // root_measure_local - dot product of two values. root_measure_local = 0 if pair of [phi, alpha] are roots
+  double xt[2], F[2], root_measure_local;
+
+  for (int i = 1; i < N_phi - 1; i++){
+    for (int j = 1; j < N_alpha - 1; j++){
+      xt[0] = phi_low   + step_phi   * i;
+      xt[1] = alpha_low + step_alpha * j;
+      input_try_unknown_parameters(xt, 2, pfzw, F, errmsg);
+      (*fevals)++;
+      root_measure_local = pow(F[0], 2.) + pow(F[1], 2.);
+      if (root_measure_local < *root_measure){
+        *root_measure = root_measure_local;
+        root_loc[0] = xt[0];
+        root_loc[1] = xt[1];
+      }
+    }
+  }
+
+  return _SUCCESS_;
+}
+
+/**
  * Related to 'shooting': Find the root of a one-dimensional
  * function. This function starts from a first guess, then uses a few
  * steps to bracket the root, and then calls another function to
@@ -28,11 +165,8 @@ int input_find_root_quintom(double *xzeros,
 
   /** Define local variables */
   // Currently works only if x < 0 -> alpha = (1, oo)
-  double phi_low, phi_high, f1_phi, f2_phi;
-  double alpha1, alpha2, f1_alpha, f2_alpha;
-  int iter, iter2;
-  int return_function;
-
+  double phi_low, phi_high;
+  
   int flag;
   double xi_smg, v0_smg, m2_smg, lambda_smg;
   // != Martin
@@ -48,13 +182,52 @@ int input_find_root_quintom(double *xzeros,
   class_call(parser_read_double(&(pfzw->fc),"lambda_smg",&lambda_smg,&flag,errmsg),
             errmsg,
             errmsg);
-  phi_low = 0.;
 
-  class_test(m2_smg*m2_smg - 4.*lambda_smg*v0_smg < 0, errmsg, "(m^2)^2 - 4 lambda v0 < 0 -> Solution does not exist with these parameters. params: (%g %g %g %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
+  /*
+    1) d_dphi(V/F^2)|_phi* <= 0 -> Otherwise it would be tilted towards negative side
+    We want it to roll down from 0 -> phi+
+    This gives that phi_*_max = sqrt(-m2/lambda)
+    2) Check that V/F^2 at singular point limit (F(phi_0) = 0) is > -oo
+      More strict is saying that V(phi_0) > 0
+      */
+  class_test(m2_smg*m2_smg - 4.*lambda_smg*v0_smg < 0, errmsg, "(m^2)^2 - 4 lambda v0 < 0 -> Solution does not exist with these parameters. params (xi, v0, m2, lambda): (%g %g %g %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
+  class_test(-m2_smg/lambda_smg < 0, errmsg, "m^2/lambda < 0 -> Solution does not exist with these parameters. params (xi, v0, m2, lambda): (%g %g %g %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
+  phi_low = 0.;
+  phi_high = pow(-m2_smg/lambda_smg, 0.5);
+  double phi_star_1 = pow((-m2_smg - pow(m2_smg*m2_smg - 4. * v0_smg*lambda_smg, 0.5))/lambda_smg, 0.5) - pow(fabs(xi_smg), -0.5);
+  double phi_star_2 = pow((-m2_smg + pow(m2_smg*m2_smg - 4. * v0_smg*lambda_smg, 0.5))/lambda_smg, 0.5) - pow(fabs(xi_smg), -0.5);
+  // We can show
+  /*
+      OK         Not OK        OK
+  --------|----------------|--------|
+      phi_star_1      phi_star_2    phi_max (so the rolling would be to right)
+  */
   
-  phi_high = -1./pow(fabs(xi_smg), 0.5) + pow((-m2_smg - pow(m2_smg*m2_smg - 4.*lambda_smg*v0_smg, 0.5))/lambda_smg, 0.5);
   if (input_verbose >= 2){
-    printf("phi_min: %g, phi_max: %g\n", phi_low, phi_high);
+    printf("Calculated ranges: phi_0 = phi* in [%g, %g] or [%g, %g] (Some can be invalid)\n", phi_low, phi_star_1, phi_star_2, phi_high);
+  }
+
+  double phi_intervals[2][2] = {
+      {phi_low, phi_star_1},
+      {phi_star_2, phi_high}
+    };
+  
+  // Make interval lower bound limited to 0 and higher bound limited to phi_max
+  if (phi_star_1 > phi_high){
+    phi_intervals[0][1] = phi_high;
+    if (input_verbose >= 2){
+      printf("Possible range is : phi_0 = phi* in [%g, %g]\n", phi_intervals[0][0], phi_intervals[0][1]);
+    }
+  }
+  else if (phi_star_2 < 0){
+    phi_intervals[1][0] = 0.;
+    if (input_verbose >= 2){
+      printf("Possible range is : phi_0 = phi* in [%g, %g]\n", phi_intervals[1][0], phi_intervals[1][1]);
+    }
+  }
+
+  if (phi_star_2 >= phi_high && phi_low >= phi_star_1){
+    class_stop(errmsg, "Solutions don't exist. No possible phi_shift values such that effective potential would be bounded below. Calculated intervals were [%g,%g] and [%g,%g] params: (%g %g %g %g)", phi_intervals[0][0], phi_intervals[0][1], phi_intervals[1][0], phi_intervals[1][1], xi_smg, v0_smg, m2_smg, lambda_smg);
   }
   
   /** 
@@ -64,25 +237,33 @@ int input_find_root_quintom(double *xzeros,
    */
   if (unknown_parameters_size == 1){
     // NB! Assume this is scalar field then!
-    class_call(input_fzerofun_1d(phi_low, pfzw, &f1_phi, errmsg),
-              errmsg,
-              errmsg);
+    // Valid search intervals: solution must be in (phi_low, phi_high) but not in (phi2_1, phi2_2)
     int N_tries = 10;
-    double phi;
-    double dphi = (phi_high-phi_low)/N_tries;
-    for (int i=1; i<=N_tries; i++){
-      phi = phi_low+i*dphi;
-      class_call(input_fzerofun_1d(phi, pfzw, &f2_phi, errmsg),
-              errmsg,
-              errmsg);
-      
-      if (f1_phi*f2_phi < 0){
-        break;
+    double f1_phi, f2_phi;
+    double dphi;
+    double phi = phi_low;
+    int found = 0;
+
+    for (int iv = 0; iv < 2 && !found; iv++){
+      double iv_low  = phi_intervals[iv][0];
+      double iv_high = phi_intervals[iv][1];
+      if (iv_high <= iv_low) continue;  // interval is empty/invalid
+
+      class_call(input_fzerofun_1d(iv_low, pfzw, &f1_phi, errmsg), errmsg, errmsg);
+      dphi = (iv_high - iv_low) / N_tries;
+      for (int i = 1; i <= N_tries; i++){
+        phi = iv_low + i * dphi;
+        class_call(input_fzerofun_1d(phi, pfzw, &f2_phi, errmsg), errmsg, errmsg);
+        if (f1_phi * f2_phi < 0){
+          phi_low  = iv_low;
+          phi_high = phi;
+          found = 1;
+          break;
+        }
       }
     }
-    phi_high=phi;
-    if (f1_phi*f2_phi>0){
-      class_stop(errmsg, "Couldn't bracket between φ: [0, %g] -> [%g, %g] params: (%g %g %g %g)", phi_high, f1_phi, f2_phi, xi_smg, v0_smg, m2_smg, lambda_smg);
+    if (!found){
+      class_stop(errmsg, "Couldn't bracket φ in valid intervals [%g,%g] and [%g,%g] params: (%g %g %g %g)", phi_intervals[0][0], phi_intervals[0][1], phi_intervals[1][0], phi_intervals[1][1], xi_smg, v0_smg, m2_smg, lambda_smg);
     }
 
     /** Find root using Ridders method (Exchange for bisection if you are old-school) */
@@ -99,6 +280,7 @@ int input_find_root_quintom(double *xzeros,
               errmsg,errmsg);
     return _SUCCESS_;
   }
+
    /** 
    * ==============================
    * ====== Tune shift + Mpl ======
@@ -107,439 +289,169 @@ int input_find_root_quintom(double *xzeros,
 
   else if (unknown_parameters_size == 2){
     /*
-    * 1) Make sure that root exists
-    * 2) Find good estimation for the root
-    * 3) Find the root
-    *
-    * 1) Use winding number to determine if root can exist inside the boundaries
-    *   1.1) If winding number |w| > 0.9 -> root exists  
-    * 2) Use coarse-grain to find good estimation for the root
-    * 3) Use some root method to converge to correct root
+    * For each valid phi interval (excluding [phi2_1, phi2_2]):
+    * 1) Use winding number to confirm a root exists inside the rectangle
+    * 2) Coarse-grain scan to find a good initial guess
+    * 3) Newton-Raphson to converge to the root
     */
 
-    int Niter,MAXIT=100;
-    
-    double alpha_low = 1.;
+    double alpha_low  = 1.;
     double alpha_high = 2.;
-    double dx_alpha = 0.2;
 
-    double x1[2], x2[2], xt[2];
-    double F1[2], F2[2], F[2], Fl[2], Fh[2];
-
+    // 2 * (winding_lattice_size_alpha + winding_lattice_size_phi) - 4 total points  
     int winding_lattice_size_alpha = 9;
-    int winding_lattice_size_phi = 9;
-    int winding_N = 2 * (winding_lattice_size_alpha + winding_lattice_size_phi) - 4;
-    int winding_idx = 0;
-    double winding_boundary_F[winding_N][2];
-    double winding_boundary_F_cross;
-    double winding_boundary_F_dot;
-    double winding_number = 0.;
-    double winding_step_x, winding_step_y;
-    winding_step_x = (phi_high-phi_low)/(winding_lattice_size_phi-1);
-    winding_step_y = (alpha_high-alpha_low)/(winding_lattice_size_alpha-1);
+    int winding_lattice_size_phi   = 9;
+    // (root_lattice_size_alpha - 1) * (root_lattice_size_phi - 1) 
+    int root_lattice_size_alpha    = 7;
+    int root_lattice_size_phi      = 7;
 
 
-    // NB! Make sure that (winding_lattice_size_alpha-1)/(root_lattice_size_alpha-1) dividing exactly
-    // 2 Boundary points and 5 inner points
-    int root_lattice_size_alpha = 7;
-    // NB! Make sure that (winding_lattice_size_phi-1)/(root_lattice_size_phi-1) dividing exactly
-    // 2 Boundary points and 5 inner points
-    int root_lattice_size_phi = 7;
-
-    double root_step_phi = (phi_high-phi_low)/(root_lattice_size_phi-1);
-    double root_step_alpha = (alpha_high-alpha_low)/(root_lattice_size_alpha-1);
-    double root_measure2 = 1000000.;
-    double measure2;
-    double root_loc[2];
-    double root_beta;
-    double root_beta_phi;
-    double root_beta_alpha;
-
-    
-
-    /*
-    * ====================================
-    * ===== Calculate winding number =====
-    * ====================================
-    */
-   
-    if (input_verbose >= 3){
-      printf("=== Calculating winding number ===\n");
-    }
-
-    // Bottom edge
-    xt[1] = alpha_low;
-    for (int i=0; i<winding_lattice_size_phi; i++){
-      xt[0] = phi_low+i*winding_step_x;
-      input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[winding_idx], errmsg);
-      measure2 = pow(winding_boundary_F[winding_idx][0], 2.) + pow(winding_boundary_F[winding_idx][1], 2.);
-      if (measure2 < root_measure2){
-        root_measure2 = measure2;
-        root_loc[0] = xt[0];
-        root_loc[1] = xt[1];
-      }
-
-      winding_idx++;
-      (*fevals)++;
-    }
-
-    // Right edge
-    xt[0] = phi_high;
-    for (int i=1; i<winding_lattice_size_alpha; i++){
-      xt[1] = alpha_low+i*winding_step_y;
-      input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[winding_idx], errmsg);
-      measure2 = pow(winding_boundary_F[winding_idx][0], 2.) + pow(winding_boundary_F[winding_idx][1], 2.);
-      if (measure2 < root_measure2){
-        root_measure2 = measure2;
-        root_loc[0] = xt[0];
-        root_loc[1] = xt[1];
-      }
-
-
-      winding_idx++;
-      (*fevals)++;
-    }
-
-    xt[1] = alpha_high;
-    for (int i=1; i<winding_lattice_size_phi; i++){
-      xt[0] = phi_high - i*winding_step_x;
-      input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[winding_idx], errmsg);
-      measure2 = pow(winding_boundary_F[winding_idx][0], 2.) + pow(winding_boundary_F[winding_idx][1], 2.);
-      if (measure2 < root_measure2){
-        root_measure2 = measure2;
-        root_loc[0] = xt[0];
-        root_loc[1] = xt[1];
-      }
-
-      
-      winding_idx++;
-      (*fevals)++;
-    }
-
-    xt[0] = phi_low;
-    for (int i=1; i<winding_lattice_size_alpha-1; i++){
-      xt[1] = alpha_high - i*winding_step_y;
-      input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[winding_idx], errmsg);
-      measure2 = pow(winding_boundary_F[winding_idx][0], 2.) + pow(winding_boundary_F[winding_idx][1], 2.);
-      if (measure2 < root_measure2){
-        root_measure2 = measure2;
-        root_loc[0] = xt[0];
-        root_loc[1] = xt[1];
-      }
-
-      winding_idx++;
-      (*fevals)++;
-    }
-
-    int ip;
-
-    for (int i = 0; i < winding_N; i++) {
-      ip = (i+1) % winding_N;
-      winding_boundary_F_cross = winding_boundary_F[i][0] * winding_boundary_F[ip][1] - winding_boundary_F[i][1]*winding_boundary_F[ip][0];
-      winding_boundary_F_dot = winding_boundary_F[i][0] * winding_boundary_F[ip][0] + winding_boundary_F[i][1]*winding_boundary_F[ip][1];
-      winding_number += atan2(winding_boundary_F_cross, winding_boundary_F_dot);
-    }
-
-    winding_number = fabs(winding_number)/(2.*_PI_);
-    
-    if (input_verbose >= 3){
-      printf("=== Absolute of winding number: |w| = %g\n\n", winding_number);
-    }
-    if (winding_number < 0.9){
-      class_stop(errmsg, "φ = [%g %g] and α = [%g %g]. Winding number |w| = %g < 0.9. params: (%g %g %g %g)", phi_low, phi_high, alpha_low, alpha_high, winding_number, xi_smg, v0_smg, m2_smg, lambda_smg);
-    }
-    /*
-    * =====================================
-    * ===== Coarse grain root finding =====
-    * =====================================
-    */
-
-    // Don't have to check boundary, as this is already done when calculating boundaries
-    for (int i=1; i<root_lattice_size_phi-1; i++){
-      for (int j=1; j<root_lattice_size_alpha-1; j++){
-        xt[0] = phi_low + root_step_phi*i;
-        xt[1] = alpha_low + root_step_alpha*j;
-        input_try_unknown_parameters(xt, 2, pfzw, F, errmsg);
-        (*fevals)++;
-
-        measure2 = pow(F[0], 2.) + pow(F[1], 2.);
-        if (measure2 < root_measure2){
-          root_measure2 = measure2;
-          root_loc[0] = xt[0];
-          root_loc[1] = xt[1];
-        }
-      }
-    }
-   
-     /*
-    * ==========================
-    * ===== Newton-Raphson =====
-    * ==========================
-    */
-
+    int Niter, MAXIT = 100;
+    double xt[2], x1[2], x2[2];
+    double F[2], F1[2], F2[2], F_adaptive[2];
+    double dphi, dalpha, J11, J12, J21, J22, det;
+    double clamp, F_norm, beta;
+    double xt_adaptive[2], lastF[2];
+    double root_beta_phi, root_beta_alpha;
     double hx, hy;
-    xt[0] = root_loc[0];
-    xt[1] = root_loc[1];
+    int stuck_counter;
 
-    double dphi, dalpha;
-    double J11, J12, J21, J22, det;
-    for (Niter=0; Niter<MAXIT; Niter++){
-      input_try_unknown_parameters(xt, 2, pfzw, F, errmsg);
-      *fevals += 1;
-      if (fabs(F[0]) <= tol_F & fabs(F[1]) <= tol_F){
-        xzeros[0] = xt[0];
-        xzeros[1] = xt[1];
-        if (phi_low <= xzeros[0] && xzeros[0] <= phi_high && alpha_low <= xzeros[1]){
-          return _SUCCESS_;
+    for (int iv = 0; iv < 2; iv++){
+      double iv_phi_low  = phi_intervals[iv][0];
+      double iv_phi_high = phi_intervals[iv][1];
+      if (iv_phi_high <= iv_phi_low) continue;  // interval is empty/invalid
+
+      double root_measure = 100000000.;
+      double root_loc[2];
+      double winding_number = 0.;
+
+      /*
+      * ====================================
+      * ===== Calculate winding number =====
+      * ====================================
+      */
+      if (input_verbose >= 3){
+        printf("=== Calculating winding number for φ in [%g, %g] ===\n", iv_phi_low, iv_phi_high);
+      }
+
+      compute_winding_number_2d(pfzw, iv_phi_low, iv_phi_high, alpha_low, alpha_high,
+                                winding_lattice_size_phi, winding_lattice_size_alpha,
+                                fevals, root_loc, &root_measure, &winding_number, errmsg);
+
+      if (input_verbose >= 2){
+        printf("=== Absolute of winding number: |w| = %g\n\n", winding_number);
+      }
+      if (winding_number < 0.9){
+        if (input_verbose >= 2){
+          printf("φ = [%g, %g], α = [%g, %g]: winding number |w| = %g < 0.9, skipping interval.\n", iv_phi_low, iv_phi_high, alpha_low, alpha_high, winding_number);
         }
-        else{
-          class_stop(errmsg, "Solution is not inside the boundary. φ* %g <= %g <= %g, α: %g <= %g <= %g", phi_low, xzeros[0], phi_high, alpha_low, xzeros[1], alpha_high);
+        continue;
+      }
+
+      /*
+      * =====================================
+      * ===== Coarse grain root finding =====
+      * =====================================
+      * 
+      * As root should exist in this boundary, do some coarse grain calculation to find
+      * estimate the location for root.
+      */
+      find_coarse_root_2d(pfzw, iv_phi_low, iv_phi_high, alpha_low, alpha_high,
+                          root_lattice_size_phi, root_lattice_size_alpha,
+                          fevals, root_loc, &root_measure, errmsg);
+
+      /*
+      * ==========================
+      * ===== Newton-Raphson =====
+      * ==========================
+      */
+      xt[0] = root_loc[0];
+      xt[1] = root_loc[1];
+      beta = 1.;
+      stuck_counter = 0;
+
+      for (Niter = 0; Niter < MAXIT; Niter++){
+        input_try_unknown_parameters(xt, 2, pfzw, F, errmsg);
+        if (Niter > 0){
+          if (fabs(lastF[0] - F[0]) < tol_F && fabs(lastF[1] - F[1]) < tol_F){
+            stuck_counter++;
+            if (stuck_counter == 5){
+              class_stop(errmsg, "Could not find root. Algorithm got stuck in φ = [%g, %g], α = [%g, %g]. params (xi, v0, m2, lambda): (%g, %g, %g, %g) w = %g", iv_phi_low, iv_phi_high, alpha_low, alpha_high, xi_smg, v0_smg, m2_smg, lambda_smg, winding_number);
+            }
+          }
+          else {
+            stuck_counter = 0;
+          }
         }
-      }
-      hx = cbrt(DBL_EPSILON) * fmax(fabs(xt[0]), 1.0);
-      hy = cbrt(DBL_EPSILON) * fmax(fabs(xt[1]), 1.0);
-      x1[0] = xt[0]+hx;
-      x1[1] = xt[1];
-      x2[0] = xt[0]-hx;
-      x2[1] = xt[1];
-      input_try_unknown_parameters(x1, 2, pfzw, F1, errmsg);
-      input_try_unknown_parameters(x2, 2, pfzw, F2, errmsg);
-      *fevals += 2;
-      J11 = (F1[0] - F2[0])/(2.*hx);
-      J21 = (F1[1] - F2[1])/(2.*hx);
-      x1[0] = xt[0];
-      x1[1] = xt[1]+hy;
-      x2[0] = xt[0];
-      x2[1] = xt[1]-hy;
-      input_try_unknown_parameters(x1, 2, pfzw, F1, errmsg);
-      input_try_unknown_parameters(x2, 2, pfzw, F2, errmsg);
-      *fevals += 2;
-      J12 = (F1[0] - F2[0])/(2.*hy);
-      J22 = (F1[1] - F2[1])/(2.*hy);
-      det = J11*J22 - J12*J21;
-      if (fabs(det) < 1e-20){
-        class_stop(errmsg, "Determinant is singular. params: (%g, %g, %g, %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
-      }
-      dphi = -(F[0]*J22 - F[1]*J12)/det;
-      dalpha = -(F[1]*J11 - F[0]*J21)/det;
+        memcpy(lastF, F, sizeof(F));
+        *fevals += 1;
+        if (fabs(F[0]) <= tol_F && fabs(F[1]) <= tol_F){
+          xzeros[0] = xt[0];
+          xzeros[1] = xt[1];
+          if (iv_phi_low <= xzeros[0] && xzeros[0] <= iv_phi_high && alpha_low <= xzeros[1]){
+            return _SUCCESS_;
+          }
+          else{
+            class_stop(errmsg, "Solution is not inside the boundary. φ* %g <= %g <= %g, α: %g <= %g <= %g", iv_phi_low, xzeros[0], iv_phi_high, alpha_low, xzeros[1], alpha_high);
+          }
+        }
+        printf("F = [%g, %g], tol = %g\n", F[0], F[1], tol_F);
+        hx = cbrt(DBL_EPSILON) * fmax(fabs(xt[0]), 1.0);
+        hy = cbrt(DBL_EPSILON) * fmax(fabs(xt[1]), 1.0);
+        x1[0] = xt[0]+hx; x1[1] = xt[1];
+        x2[0] = xt[0]-hx; x2[1] = xt[1];
+        input_try_unknown_parameters(x1, 2, pfzw, F1, errmsg);
+        input_try_unknown_parameters(x2, 2, pfzw, F2, errmsg);
+        *fevals += 2;
+        J11 = (F1[0] - F2[0]) / (2.*hx);
+        J21 = (F1[1] - F2[1]) / (2.*hx);
+        x1[0] = xt[0]; x1[1] = xt[1]+hy;
+        x2[0] = xt[0]; x2[1] = xt[1]-hy;
+        input_try_unknown_parameters(x1, 2, pfzw, F1, errmsg);
+        input_try_unknown_parameters(x2, 2, pfzw, F2, errmsg);
+        *fevals += 2;
+        J12 = (F1[0] - F2[0]) / (2.*hy);
+        J22 = (F1[1] - F2[1]) / (2.*hy);
+        det = J11*J22 - J12*J21;
+        if (fabs(det) < 1e-20){
+          class_stop(errmsg, "Determinant is singular. params (xi, v0, m2, lambda): (%g, %g, %g, %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
+        }
+        dphi   = -(F[0]*J22 - F[1]*J12) / det;
+        dalpha = -(F[1]*J11 - F[0]*J21) / det;
+        // printf("J = [%g, %g; %g, %g] det = %g\n", J11, J12, J21, J22, det);
+        // printf("step: dphi = %g, dalpha = %g\n", dphi, dalpha);
+        // printf("xt_low = [%g, %g], xt_high = [%g, %g]\n", iv_phi_low, alpha_low, iv_phi_high, alpha_high);
+        // printf("xt = [%g, %g]\n", xt[0], xt[1]);
 
-      xt[0] = xt[0] + dphi;
-      xt[1] = xt[1] + dalpha;
-      // NB: Make sure the variables stay in the boundaries!
-      // Find highest constant such that step stays inside the boundaries
-      if (xt[0] < phi_low || xt[0] > phi_high || xt[1] < alpha_low || xt[1] > alpha_high){
-        // Make step back
-        xt[0] = xt[0] - dphi;
-        xt[1] = xt[1] - dalpha;
+        F_norm = fabs(F[0]) + fabs(F[1]);
+        beta = 1.0;
+        for (int k = 0; k < 10; k++){
+          xt_adaptive[0] = xt[0] + beta * dphi;
+          xt_adaptive[1] = xt[1] + beta * dalpha;
 
-        root_beta_phi = (dphi>0) ? (phi_high - xt[0])/dphi : (phi_low - xt[0])/dphi;
-        root_beta_alpha = (dalpha>0) ? (alpha_high - xt[1])/dalpha : (alpha_low - xt[1])/dalpha;
-
-        root_beta = fmin(1., fmin(root_beta_phi, root_beta_alpha));
-        xt[0] = xt[0] + root_beta*dphi;
-        xt[1] = xt[1] + root_beta*dalpha;
+          if (xt_adaptive[0] < iv_phi_low || xt_adaptive[0] > iv_phi_high || xt_adaptive[1] < alpha_low || xt_adaptive[1] > alpha_high){
+            root_beta_phi   = (dphi   > 0) ? (iv_phi_high - xt[0]) / (beta * dphi)   : (iv_phi_low  - xt[0]) / (beta * dphi);
+            root_beta_alpha = (dalpha > 0) ? (alpha_high  - xt[1]) / (beta * dalpha) : (alpha_low   - xt[1]) / (beta * dalpha);
+            clamp = fmin(1., fmin(root_beta_phi, root_beta_alpha));
+            xt_adaptive[0] = xt[0] + clamp * beta * dphi;
+            xt_adaptive[1] = xt[1] + clamp * beta * dalpha;
+          }
+          // printf("xt_adaptive = [%g, %g]\n", xt_adaptive[0], xt_adaptive[1]);
+          input_try_unknown_parameters(xt_adaptive, 2, pfzw, F_adaptive, errmsg);
+          *fevals += 1;
+          if (fabs(F_adaptive[0]) + fabs(F_adaptive[1]) < F_norm) break;
+          beta *= 0.5;
+        }
+        xt[0] = xt_adaptive[0];
+        xt[1] = xt_adaptive[1];
       }
-    }    
+      class_stop(errmsg, "Could not find solution in φ = [%g, %g]. params (xi, v0, m2, lambda): (%g, %g, %g, %g) w = %g", iv_phi_low, iv_phi_high, xi_smg, v0_smg, m2_smg, lambda_smg, winding_number);
+    }
+    class_stop(errmsg, "No valid interval had winding number >= 0.9. φ2 excluded zone: [%g, %g]. params: (%g %g %g %g)", phi_star_1, phi_star_2, xi_smg, v0_smg, m2_smg, lambda_smg);
   }
   else {
     class_stop(errmsg, "Unknown parameter count is bigger than > 2 (%i)\n", unknown_parameters_size);
   }
-  class_stop(errmsg, "Could not find solution with high enough accuracy. params: (%g, %g, %g, %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
+  class_stop(errmsg, "Could not find solution with high enough accuracy. params (xi, v0, m2, lambda): (%g, %g, %g, %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
   // return _SUCCESS_;
-}
-
-int solve_for_alpha_quintom(
-  int unknown_parameters_size,
-  double *x1,
-  double *x2,
-  double xtol,
-  void *param,
-  double *Fx1,
-  double *Fx2,
-  double *xzeros,
-  int *fevals,
-  ErrorMsg error_message
-){
-  int j,MAXIT=1000;
-  double alpha = 1.137970;
-  double *fh,*fl,*xh,*xl;
-  double Fzero[2] = {0., 0.};
-
-  class_alloc(fh, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(fl, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(xh, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(xl, unknown_parameters_size*sizeof(double), error_message);
-
-  
-  if ((Fx1!=NULL)&&(Fx2!=NULL)){
-    for (int i=0; i<unknown_parameters_size; i++){
-      fl[i] = Fx1[i];
-      fh[i] = Fx2[i];
-      xl[i] = x1[i];
-      xh[i] = x2[i];
-    }
-  }
-  xl[1] = alpha;
-  xh[1] = alpha;
-  xzeros[1] = alpha;
-
-  input_try_unknown_parameters(xl, unknown_parameters_size, param, fl, error_message);
-  // printf("Value 1: %g, Value 2: %g\n", xl[0], xl[1]);
-  input_try_unknown_parameters(xh, unknown_parameters_size, param, fh, error_message);
-  // printf("Value 1: %g, Value 2: %g\n", xh[0], xh[1]);
-  input_fzero_ridder_quintom(
-      input_try_unknown_parameters,
-      unknown_parameters_size,
-      0,
-      xl,
-      xh,
-      xtol,
-      param,
-      fl,
-      fh,
-      xzeros,
-      fevals,
-      error_message
-    );
-  free(fh); free(fl); free(xh); free(xl);
-  // printf("x[0]: %g f[0]: %g, x[1]: %g f[1]: %g.\n", xzeros[0], Fzero[0], xzeros[1], Fzero[1]);
-  input_try_unknown_parameters(xzeros, unknown_parameters_size, param, Fzero, error_message);
-  // printf("x[0]: %g f[0]: %g, x[1]: %g f[1]: %g.\n", xzeros[0], Fzero[0], xzeros[1], Fzero[1]);
-}
-
-
-int input_fzero_ridder_quintom(int (*func)(double* x,
-                                   int unknown_parameters_size,
-                                   void *param,
-                                   double *y,
-                                   ErrorMsg error_message),
-                       int unknown_parameters_size,
-                       int parameter_idx,
-                       double *x1,
-                       double *x2,
-                       double xtol,
-                       void *param,
-                       double *Fx1,
-                       double *Fx2,
-                       double *xzero,
-                       int *fevals,
-                       ErrorMsg error_message){
-
-  /** Summary: */
-
-  /** Define local variables */
-  int j,MAXIT=1000;
-  double *ans,*fh,*fl,*fm,*fnew,*xh,*xl,*xm,*xnew;
-  double s;
-  
-  class_alloc(ans, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(fh, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(fl, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(fm, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(fnew, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(xh, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(xl, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(xm, unknown_parameters_size*sizeof(double), error_message);
-  class_alloc(xnew, unknown_parameters_size*sizeof(double), error_message);
-  
-  // Initialization
-  for (int i=0; i<unknown_parameters_size; i++){
-    xl[i] = x1[i];
-    xh[i] = x2[i];
-    xm[i] = x2[i];
-    xnew[i] = x2[i];
-    ans[i] = x2[i];
-  }
-
-  if ((Fx1!=NULL)&&(Fx2!=NULL)){
-    for (int i=0; i<unknown_parameters_size; i++){
-      fl[i] = Fx1[i];
-      fh[i] = Fx2[i];
-    }
-  }
-  else{
-    class_call((*func)(x1, unknown_parameters_size, param, fl, error_message),
-               error_message, error_message);
-    class_call((*func)(x2, unknown_parameters_size, param, fh, error_message),
-               error_message, error_message);
-
-    *fevals = (*fevals)+2;
-  }
-
-
-  if ((fl[parameter_idx] > 0.0 && fh[parameter_idx] < 0.0) || (fl[parameter_idx] < 0.0 && fh[parameter_idx] > 0.0)) {
-    xl[parameter_idx]=x1[parameter_idx];
-    xh[parameter_idx]=x2[parameter_idx];
-    ans[parameter_idx]=-1.11e11;
-    for (j=1;j<=MAXIT;j++) {
-      xm[parameter_idx]=0.5*(xl[parameter_idx]+xh[parameter_idx]);
-      class_call((*func)(xm, unknown_parameters_size, param, fm, error_message),
-                 error_message, error_message);
-      *fevals = (*fevals)+1;
-      s=sqrt(fm[parameter_idx]*fm[parameter_idx]-fl[parameter_idx]*fh[parameter_idx]);
-      if (s == 0.0){
-        xzero[parameter_idx] = ans[parameter_idx];
-        return _SUCCESS_;
-      }
-      xnew[parameter_idx]=xm[parameter_idx]+(xm[parameter_idx]-xl[parameter_idx])*((fl[parameter_idx] >= fh[parameter_idx] ? 1.0 : -1.0)*fm[parameter_idx]/s);
-      if (fabs(xnew[parameter_idx]-ans[parameter_idx]) <= xtol) {
-        xzero[parameter_idx] = ans[parameter_idx];
-        return _SUCCESS_;
-      }
-      
-      ans[parameter_idx]=xnew[parameter_idx];
-      class_call((*func)(ans, unknown_parameters_size, param, fnew, error_message),
-                 error_message, error_message);
-                 *fevals = (*fevals)+1;
-      if (fnew[parameter_idx] == 0.0){
-        xzero[parameter_idx] = ans[parameter_idx];
-        return _SUCCESS_;
-      }
-
-      if (NRSIGN(fm[parameter_idx],fnew[parameter_idx]) != fm[parameter_idx]) {
-        xl[parameter_idx]=xm[parameter_idx];
-        fl[parameter_idx]=fm[parameter_idx];
-        xh[parameter_idx]=ans[parameter_idx];
-        fh[parameter_idx]=fnew[parameter_idx];
-      }
-      else if (NRSIGN(fl[parameter_idx],fnew[parameter_idx]) != fl[parameter_idx]) {
-        xh[parameter_idx]=ans[parameter_idx];
-        fh[parameter_idx]=fnew[parameter_idx];
-      }
-      else if (NRSIGN(fh[parameter_idx],fnew[parameter_idx]) != fh[parameter_idx]) {
-        xl[parameter_idx]=ans[parameter_idx];
-        fl[parameter_idx]=fnew[parameter_idx];
-      }
-      else{
-        free(ans);free(fh);free(fl);free(fm);free(fnew);free(xh);free(xl);free(xm);free(xnew);
-        return _FAILURE_;
-      }
-      if (fabs(xh[parameter_idx]-xl[parameter_idx]) <= xtol) {
-        xzero[parameter_idx] = ans[parameter_idx];
-        free(ans);free(fh);free(fl);free(fm);free(fnew);free(xh);free(xl);free(xm);free(xnew);
-        return _SUCCESS_;
-      }
-    }
-    class_stop(error_message,"zriddr exceed maximum iterations");
-  }
-
-  else {
-    if (fl[parameter_idx] == 0.0){
-      for (int i = 0; i<unknown_parameters_size; i++){
-        xzero[i] = x1[i];
-      }
-      free(ans);free(fh);free(fl);free(fm);free(fnew);free(xh);free(xl);free(xm);free(xnew);
-
-    } return _SUCCESS_;
-    if (fh[parameter_idx] == 0.0){
-      for (int i = 0; i<unknown_parameters_size; i++){
-        xzero[i] = x2[i];
-      }
-      free(ans);free(fh);free(fl);free(fm);free(fnew);free(xh);free(xl);free(xm);free(xnew);
-
-      return _SUCCESS_;
-    };
-    class_stop(error_message,"root must be bracketed in zriddr.");
-  }
-  class_stop(error_message,"Failure in int.");
 }
