@@ -227,7 +227,10 @@ struct background
   // !=TODO Martin - Quintom extra parameters
   double phi_star_smg;
   int turn_quintom_extension_on_smg;
-
+  double gamma_PPN_smg;
+  double beta_PPN_smg;
+  double phi_today_smg;
+  double phi_prime_today_smg;
 
   /** @name - related parameters */
 

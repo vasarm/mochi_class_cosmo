@@ -121,6 +121,10 @@ cdef extern from "class.h":
         double z_eq
         double tau_eq
         double phi_star_smg
+        double gamma_PPN_smg
+        double beta_PPN_smg
+        double phi_today_smg
+        double phi_prime_today_smg
 
     cdef struct thermodynamics:
         short is_allocated

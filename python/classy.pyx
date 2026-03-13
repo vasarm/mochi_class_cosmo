@@ -4340,6 +4340,14 @@ cdef class Class:
                 value = self.ba.phi_star_smg
             elif name == 'alpha_smg': # !=TODO Martin: Change to additional parameter 
                 value = self.ba.parameters_smg[5]
+            elif name == 'gamma_PPN_smg':
+                value = self.ba.gamma_PPN_smg
+            elif name == 'beta_PPN_smg':
+                value = self.ba.beta_PPN_smg
+            elif name == 'phi_today_smg':
+                value = self.ba.phi_today_smg
+            elif name == 'phi_prime_today_smg':
+                value = self.ba.phi_prime_today_smg
             else:
                 raise CosmoSevereError("%s was not recognized as a derived parameter" % name)
             derived[name] = value
