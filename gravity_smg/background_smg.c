@@ -84,7 +84,14 @@ int background_gravity_functions_smg(
 
 	// != Martin: If using Quintom model, then M_pl_today_smg is equal to locally measured gravitational coupling
 	if (pba->gravity_model_smg==quintom){
+		// https://arxiv.org/pdf/1108.4242
+		// M_p^2(phi) = 2G_4 =  ...
 		pba->M_pl_today_smg = (gf.G4*gf.G2_X + 4. * pow(gf.G4_phi, 2.))/(gf.G4*gf.G2_X + 3. * pow(gf.G4_phi, 2.));
+		pba->gamma_PPN_smg = 1 - 2.* pow(gf.G4_phi, 2.)/(gf.G2_X * gf.G4 + 4 * pow(gf.G4_phi, 2.));
+  		double gamma_phi = 2 * gf.G4_phi * (gf.G2_X * pow(gf.G4_phi, 2.) + gf.G4 * (gf.G2_Xphi * gf.G4_phi - 2 * gf.G2_X * gf.G4_phiphi)) / pow(gf.G2_X * gf.G4 + 4 * pow(gf.G4_phi, 2.), 2.);
+		pba->beta_PPN_smg = 1 + 0.25 * gf.G4 * gf.G4_phi * gamma_phi / (gf.G2_X * gf.G4 + 3 * pow(gf.G4_phi, 2.));
+		pba->phi_today_smg = pvecback_B[pba->index_bi_phi_smg];
+		pba->phi_prime_today_smg = pvecback_B[pba->index_bi_phi_prime_smg];;
 	}
 
 	/* get Es functions. Notation:
