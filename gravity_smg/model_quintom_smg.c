@@ -1,4 +1,57 @@
 #include "model_quintom_smg.h"
+#include "parallel.h"
+
+
+/**
+ * Deep-copy a fzerofun_workspace into dst.
+ * dst must be freed with fzerofun_workspace_free_clone() when done.
+ *
+ * @param src                    workspace to clone
+ * @param unknown_parameters_size number of entries in unknown_parameters_index
+ * @param dst                    output: populated clone
+ * @param errmsg                 error message buffer
+ */
+static int fzerofun_workspace_clone(
+    const struct fzerofun_workspace *src,
+    int unknown_parameters_size,
+    struct fzerofun_workspace *dst,
+    ErrorMsg errmsg)
+{
+  /* Deep-copy fc (allocates name/value/read arrays and copies contents) */
+  class_call(parser_init_from_pfc((struct file_content *)&src->fc, &dst->fc, errmsg), errmsg, errmsg);
+
+  dst->target_size = src->target_size;
+  dst->required_computation_stage = src->required_computation_stage;
+
+  dst->unknown_parameters_index = (int *)malloc(unknown_parameters_size * sizeof(int));
+  class_test(dst->unknown_parameters_index == NULL, errmsg, "Could not allocate unknown_parameters_index clone");
+  memcpy(dst->unknown_parameters_index, src->unknown_parameters_index,
+         unknown_parameters_size * sizeof(int));
+
+  dst->target_name = (enum target_names *)malloc(src->target_size * sizeof(enum target_names));
+  class_test(dst->target_name == NULL, errmsg, "Could not allocate target_name clone");
+  memcpy(dst->target_name, src->target_name,
+         src->target_size * sizeof(enum target_names));
+
+  dst->target_value = (double *)malloc(src->target_size * sizeof(double));
+  class_test(dst->target_value == NULL, errmsg, "Could not allocate target_value clone");
+  memcpy(dst->target_value, src->target_value,
+         src->target_size * sizeof(double));
+
+  return _SUCCESS_;
+}
+
+/**
+ * Free heap members allocated by fzerofun_workspace_clone().
+ * Does NOT free the dst struct itself (caller owns it).
+ */
+static void fzerofun_workspace_free_clone(struct fzerofun_workspace *dst)
+{
+  parser_free(&dst->fc);
+  free(dst->unknown_parameters_index);
+  free(dst->target_name);
+  free(dst->target_value);
+}
 
 
 /**
@@ -26,78 +79,94 @@ static int compute_winding_number_2d(
     ErrorMsg errmsg)
 {
   int winding_N = 2 * (N_alpha + N_phi) - 4;
-  double winding_boundary_F[winding_N][2];
   double step_phi   = (phi_high   - phi_low)   / (N_phi   - 1);
   double step_alpha = (alpha_high - alpha_low) / (N_alpha - 1);
+
+  /* -- 1. Pre-compute all boundary coordinates in winding order -- */
+  double (*boundary_xt)[2] = (double (*)[2])malloc(winding_N * sizeof(*boundary_xt));
+  class_test(boundary_xt == NULL, errmsg, "Could not allocate boundary_xt");
+  double (*boundary_F)[2]  = (double (*)[2])malloc(winding_N * sizeof(*boundary_F));
+  class_test(boundary_F  == NULL, errmsg, "Could not allocate boundary_F");
+
   int idx = 0;
-
-  double xt[2], root_measure_local;
-
   /* Bottom edge: alpha_low, phi low -> high */
-  xt[1] = alpha_low;
   for (int i = 0; i < N_phi; i++){
-    xt[0] = phi_low + i * step_phi;
-    input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[idx], errmsg);
-    root_measure_local = pow(winding_boundary_F[idx][0], 2.) + pow(winding_boundary_F[idx][1], 2.);
-    if (root_measure_local < *root_measure){
-      *root_measure = root_measure_local;
-      root_loc[0] = xt[0];
-      root_loc[1] = xt[1];
-    }
-    idx++; (*fevals)++;
+    boundary_xt[idx][0] = phi_low + i * step_phi;
+    boundary_xt[idx][1] = alpha_low;
+    idx++;
   }
-
   /* Right edge: phi_high, alpha low -> high */
-  xt[0] = phi_high;
   for (int i = 1; i < N_alpha; i++){
-    xt[1] = alpha_low + i * step_alpha;
-    input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[idx], errmsg);
-    root_measure_local = pow(winding_boundary_F[idx][0], 2.) + pow(winding_boundary_F[idx][1], 2.);
-    if (root_measure_local < *root_measure){
-      *root_measure = root_measure_local;
-      root_loc[0] = xt[0];
-      root_loc[1] = xt[1];
-    }
-    idx++; (*fevals)++;
+    boundary_xt[idx][0] = phi_high;
+    boundary_xt[idx][1] = alpha_low + i * step_alpha;
+    idx++;
   }
-
   /* Top edge: alpha_high, phi high -> low */
-  xt[1] = alpha_high;
   for (int i = 1; i < N_phi; i++){
-    xt[0] = phi_high - i * step_phi;
-    input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[idx], errmsg);
-    root_measure_local = pow(winding_boundary_F[idx][0], 2.) + pow(winding_boundary_F[idx][1], 2.);
-    if (root_measure_local < *root_measure){
-      *root_measure = root_measure_local;
-      root_loc[0] = xt[0];
-      root_loc[1] = xt[1];
-    }
-    idx++; (*fevals)++;
+    boundary_xt[idx][0] = phi_high - i * step_phi;
+    boundary_xt[idx][1] = alpha_high;
+    idx++;
   }
-
   /* Left edge: phi_low, alpha high -> low (skipping corners already covered) */
-  xt[0] = phi_low;
   for (int i = 1; i < N_alpha - 1; i++){
-    xt[1] = alpha_high - i * step_alpha;
-    input_try_unknown_parameters(xt, 2, pfzw, winding_boundary_F[idx], errmsg);
-    root_measure_local = pow(winding_boundary_F[idx][0], 2.) + pow(winding_boundary_F[idx][1], 2.);
-    if (root_measure_local < *root_measure){
-      *root_measure = root_measure_local;
-      root_loc[0] = xt[0];
-      root_loc[1] = xt[1];
-    }
-    idx++; (*fevals)++;
+    boundary_xt[idx][0] = phi_low;
+    boundary_xt[idx][1] = alpha_high - i * step_alpha;
+    idx++;
   }
 
-  /* Compute winding number from boundary samples */
+  /* -- 2. Pre-clone one workspace per boundary point -- */
+  struct fzerofun_workspace *clones = (struct fzerofun_workspace *)malloc(winding_N * sizeof(struct fzerofun_workspace));
+  class_test(clones == NULL, errmsg, "Could not allocate workspace clones");
+  for (int k = 0; k < winding_N; k++){
+    class_call(fzerofun_workspace_clone(pfzw, 2, &clones[k], errmsg), errmsg, errmsg);
+  }
+
+  /* -- 3. Evaluate all boundary points in parallel -- */
+  class_setup_parallel();
+
+  for (int k = 0; k < winding_N; k++){
+    class_run_parallel(with_arguments(k, boundary_xt, boundary_F, clones, errmsg),
+      double xt[2];
+      xt[0] = boundary_xt[k][0];
+      xt[1] = boundary_xt[k][1];
+      class_call(input_try_unknown_parameters(xt, 2, &clones[k], boundary_F[k], errmsg),
+                 errmsg, errmsg);
+      return _SUCCESS_;
+    );
+  }
+
+  class_finish_parallel();
+
+  /* -- 4. Free clones -- */
+  for (int k = 0; k < winding_N; k++){
+    fzerofun_workspace_free_clone(&clones[k]);
+  }
+  free(clones);
+
+  *fevals += winding_N;
+
+  /* -- 5. Min reduction: find boundary point closest to root -- */
+  for (int k = 0; k < winding_N; k++){
+    double rm = pow(boundary_F[k][0], 2.) + pow(boundary_F[k][1], 2.);
+    if (rm < *root_measure){
+      *root_measure    = rm;
+      root_loc[0] = boundary_xt[k][0];
+      root_loc[1] = boundary_xt[k][1];
+    }
+  }
+
+  /* -- 6. Compute winding number from ordered boundary samples -- */
   double winding_number_integral = 0.;
   for (int i = 0; i < winding_N; i++){
     int ip = (i + 1) % winding_N;
-    double cross = winding_boundary_F[i][0] * winding_boundary_F[ip][1] - winding_boundary_F[i][1] * winding_boundary_F[ip][0];
-    double dot   = winding_boundary_F[i][0] * winding_boundary_F[ip][0] + winding_boundary_F[i][1] * winding_boundary_F[ip][1];
+    double cross = boundary_F[i][0] * boundary_F[ip][1] - boundary_F[i][1] * boundary_F[ip][0];
+    double dot   = boundary_F[i][0] * boundary_F[ip][0] + boundary_F[i][1] * boundary_F[ip][1];
     winding_number_integral += atan2(cross, dot);
   }
   *winding_number = fabs(winding_number_integral) / (2. * _PI_);
+
+  free(boundary_F);
+  free(boundary_xt);
   return _SUCCESS_;
 }
 
@@ -114,27 +183,71 @@ static int find_coarse_root_2d(
     int *fevals,
     double root_loc[2], double *root_measure,
     ErrorMsg errmsg){
-  
+
   double step_phi   = (phi_high   - phi_low)   / (N_phi   - 1);
   double step_alpha = (alpha_high - alpha_low) / (N_alpha - 1);
-  // root_measure_local - dot product of two values. root_measure_local = 0 if pair of [phi, alpha] are roots
-  double xt[2], F[2], root_measure_local;
+  int N_inner_phi   = N_phi   - 2;
+  int N_inner_alpha = N_alpha - 2;
+  int N_inner       = N_inner_phi * N_inner_alpha;
 
+  /* -- 1. Pre-compute all interior grid coordinates (row-major, skipping boundary) -- */
+  double (*grid_xt)[2] = (double (*)[2])malloc(N_inner * sizeof(*grid_xt));
+  class_test(grid_xt == NULL, errmsg, "Could not allocate grid_xt");
+  double (*grid_F)[2]  = (double (*)[2])malloc(N_inner * sizeof(*grid_F));
+  class_test(grid_F  == NULL, errmsg, "Could not allocate grid_F");
+
+  int k = 0;
   for (int i = 1; i < N_phi - 1; i++){
     for (int j = 1; j < N_alpha - 1; j++){
-      xt[0] = phi_low   + step_phi   * i;
-      xt[1] = alpha_low + step_alpha * j;
-      input_try_unknown_parameters(xt, 2, pfzw, F, errmsg);
-      (*fevals)++;
-      root_measure_local = pow(F[0], 2.) + pow(F[1], 2.);
-      if (root_measure_local < *root_measure){
-        *root_measure = root_measure_local;
-        root_loc[0] = xt[0];
-        root_loc[1] = xt[1];
-      }
+      grid_xt[k][0] = phi_low   + step_phi   * i;
+      grid_xt[k][1] = alpha_low + step_alpha * j;
+      k++;
     }
   }
 
+  /* -- 2. Pre-clone one workspace per grid point -- */
+  struct fzerofun_workspace *clones = (struct fzerofun_workspace *)malloc(N_inner * sizeof(struct fzerofun_workspace));
+  class_test(clones == NULL, errmsg, "Could not allocate workspace clones");
+  for (k = 0; k < N_inner; k++){
+    class_call(fzerofun_workspace_clone(pfzw, 2, &clones[k], errmsg), errmsg, errmsg);
+  }
+
+  /* -- 3. Evaluate all interior points in parallel -- */
+  class_setup_parallel();
+
+  for (k = 0; k < N_inner; k++){
+    class_run_parallel(with_arguments(k, grid_xt, grid_F, clones, errmsg),
+      double xt[2];
+      xt[0] = grid_xt[k][0];
+      xt[1] = grid_xt[k][1];
+      class_call(input_try_unknown_parameters(xt, 2, &clones[k], grid_F[k], errmsg),
+                 errmsg, errmsg);
+      return _SUCCESS_;
+    );
+  }
+
+  class_finish_parallel();
+
+  /* -- 4. Free clones -- */
+  for (k = 0; k < N_inner; k++){
+    fzerofun_workspace_free_clone(&clones[k]);
+  }
+  free(clones);
+
+  *fevals += N_inner;
+
+  /* -- 5. Min reduction: find interior point closest to root -- */
+  for (k = 0; k < N_inner; k++){
+    double rm = pow(grid_F[k][0], 2.) + pow(grid_F[k][1], 2.);
+    if (rm < *root_measure){
+      *root_measure = rm;
+      root_loc[0]   = grid_xt[k][0];
+      root_loc[1]   = grid_xt[k][1];
+    }
+  }
+
+  free(grid_F);
+  free(grid_xt);
   return _SUCCESS_;
 }
 
@@ -395,7 +508,7 @@ int input_find_root_quintom(double *xzeros,
             class_stop(errmsg, "Solution is not inside the boundary. φ* %g <= %g <= %g, α: %g <= %g <= %g", iv_phi_low, xzeros[0], iv_phi_high, alpha_low, xzeros[1], alpha_high);
           }
         }
-        printf("F = [%g, %g], tol = %g\n", F[0], F[1], tol_F);
+        // printf("F = [%g, %g], tol = %g\n", F[0], F[1], tol_F);
         hx = cbrt(DBL_EPSILON) * fmax(fabs(xt[0]), 1.0);
         hy = cbrt(DBL_EPSILON) * fmax(fabs(xt[1]), 1.0);
         x1[0] = xt[0]+hx; x1[1] = xt[1];

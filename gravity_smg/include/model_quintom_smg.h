@@ -1,6 +1,10 @@
 #include "common.h"
 #include "input.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 int input_find_root_quintom(double *xzeros,
                     int *fevals,
                     int unknown_parameters_size,
@@ -39,3 +43,7 @@ int input_fzero_ridder_quintom(int (*func)(double *x,
                        double *xzeros,
                        int *fevals,
                        ErrorMsg error_message);
+
+#ifdef __cplusplus
+}
+#endif
