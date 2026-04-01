@@ -303,44 +303,61 @@ int input_find_root_quintom(double *xzeros,
     2) Check that V/F^2 at singular point limit (F(phi_0) = 0) is > -oo
       More strict is saying that V(phi_0) > 0
       */
-  class_test(m2_smg*m2_smg - 4.*lambda_smg*v0_smg < 0, errmsg, "(m^2)^2 - 4 lambda v0 < 0 -> Solution does not exist with these parameters. params (xi, v0, m2, lambda): (%g %g %g %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
+  
+  double V_determinant = m2_smg*m2_smg - 4.*lambda_smg*v0_smg;
+  class_test(lambda_smg < 0, errmsg, "lambda (%g) < 0 is not valid", lambda_smg);
   class_test(-m2_smg/lambda_smg < 0, errmsg, "m^2/lambda < 0 -> Solution does not exist with these parameters. params (xi, v0, m2, lambda): (%g %g %g %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
   phi_low = 0.;
-  phi_high = pow(-m2_smg/lambda_smg, 0.5);
-  double phi_star_1 = pow((-m2_smg - pow(m2_smg*m2_smg - 4. * v0_smg*lambda_smg, 0.5))/lambda_smg, 0.5) - pow(fabs(xi_smg), -0.5);
-  double phi_star_2 = pow((-m2_smg + pow(m2_smg*m2_smg - 4. * v0_smg*lambda_smg, 0.5))/lambda_smg, 0.5) - pow(fabs(xi_smg), -0.5);
-  // We can show
+  phi_high = sqrt(-m2_smg/lambda_smg);
+
   /*
-      OK         Not OK        OK
-  --------|----------------|--------|
-      phi_star_1      phi_star_2    phi_max (so the rolling would be to right)
-  */
-  
-  if (input_verbose >= 2){
-    printf("Calculated ranges: phi_0 = phi* in [%g, %g] or [%g, %g] (Some can be invalid)\n", phi_low, phi_star_1, phi_star_2, phi_high);
-  }
+   * Determine valid phi intervals based on the sign of the V discriminant.
+   *
+   * V(phi) = v0 + m2/2*phi^2 + lambda/4*phi^4  has zeros at
+   *   phi^2 = (-m2 ± sqrt(m2^2 - 4*lambda*v0)) / lambda
+   *
+   * det < 0:  V has no real zeros -> valid range is the full [0, phi_high]
+   *
+   * det >= 0: V has zeros at phi_star_1 <= phi_star_2, giving the excluded zone.
+   *           Valid ranges are [0, phi_star_1] and [phi_star_2, phi_high],
+   *           each clipped to [0, phi_high].
+   *
+   *    OK         Not OK        OK
+   * --------|----------------|--------|
+   *     phi_star_1      phi_star_2    phi_high
+   */
+  double phi_intervals[2][2];
 
-  double phi_intervals[2][2] = {
-      {phi_low, phi_star_1},
-      {phi_star_2, phi_high}
-    };
-  
-  // Make interval lower bound limited to 0 and higher bound limited to phi_max
-  if (phi_star_1 > phi_high){
+  if (V_determinant < 0) {
+    /* No real zeros of V: the full interval is valid */
+    phi_intervals[0][0] = phi_low;
     phi_intervals[0][1] = phi_high;
-    if (input_verbose >= 2){
-      printf("Possible range is : phi_0 = phi* in [%g, %g]\n", phi_intervals[0][0], phi_intervals[0][1]);
+    phi_intervals[1][0] = phi_high;  /* empty sentinel */
+    phi_intervals[1][1] = phi_high;
+    if (input_verbose >= 2) {
+      printf("V determinant < 0: no V zeros, valid range [%g, %g]\n", phi_low, phi_high);
     }
   }
-  else if (phi_star_2 < 0){
-    phi_intervals[1][0] = 0.;
-    if (input_verbose >= 2){
-      printf("Possible range is : phi_0 = phi* in [%g, %g]\n", phi_intervals[1][0], phi_intervals[1][1]);
-    }
-  }
+  else {
+    /* Positive determinant: compute excluded-zone boundaries */
+    double sqrt_det = sqrt(V_determinant);
+    double phi_star_1 = sqrt((-m2_smg - sqrt_det) / lambda_smg) - pow(fabs(xi_smg), -0.5);
+    double phi_star_2 = sqrt((-m2_smg + sqrt_det) / lambda_smg) - pow(fabs(xi_smg), -0.5);
 
-  if (phi_star_2 >= phi_high && phi_low >= phi_star_1){
-    class_stop(errmsg, "Solutions don't exist. No possible phi_shift values such that effective potential would be bounded below. Calculated intervals were [%g,%g] and [%g,%g] params: (%g %g %g %g)", phi_intervals[0][0], phi_intervals[0][1], phi_intervals[1][0], phi_intervals[1][1], xi_smg, v0_smg, m2_smg, lambda_smg);
+    if (input_verbose >= 2) {
+      printf("V determinant >= 0: phi_star_1 = %g, phi_star_2 = %g, phi_high = %g\n",
+             phi_star_1, phi_star_2, phi_high);
+      printf("Candidate ranges: [%g, %g] and [%g, %g] (before clipping)\n",
+             phi_low, phi_star_1, phi_star_2, phi_high);
+    }
+
+    /* Interval 0: [phi_low, phi_star_1], clipped to phi_high */
+    phi_intervals[0][0] = phi_low;
+    phi_intervals[0][1] = (phi_star_1 < phi_high) ? phi_star_1 : phi_high;
+
+    /* Interval 1: [phi_star_2, phi_high], clipped to phi_low */
+    phi_intervals[1][0] = (phi_star_2 > phi_low) ? phi_star_2 : phi_low;
+    phi_intervals[1][1] = phi_high;
   }
   
   /** 
@@ -560,7 +577,7 @@ int input_find_root_quintom(double *xzeros,
       }
       class_stop(errmsg, "Could not find solution in φ = [%g, %g]. params (xi, v0, m2, lambda): (%g, %g, %g, %g) w = %g", iv_phi_low, iv_phi_high, xi_smg, v0_smg, m2_smg, lambda_smg, winding_number);
     }
-    class_stop(errmsg, "No valid interval had winding number >= 0.9. φ2 excluded zone: [%g, %g]. params: (%g %g %g %g)", phi_star_1, phi_star_2, xi_smg, v0_smg, m2_smg, lambda_smg);
+    class_stop(errmsg, "No valid interval had winding number >= 0.9. params: (%g %g %g %g)", xi_smg, v0_smg, m2_smg, lambda_smg);
   }
   else {
     class_stop(errmsg, "Unknown parameter count is bigger than > 2 (%i)\n", unknown_parameters_size);

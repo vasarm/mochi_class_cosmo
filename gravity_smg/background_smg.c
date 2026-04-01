@@ -382,7 +382,7 @@ int background_free_smg(
 	if (pba->parameters_smg != NULL)
 	  free(pba->parameters_smg);
 	//dealocate parameters_2_smg only for parameterizations
-	if (pba->field_evolution_smg == _FALSE_ && pba->parameters_2_smg != NULL)
+	if (pba->parameters_2_smg != NULL)
 	  free(pba->parameters_2_smg);
 	if(pba->gravity_model_smg == stable_params && pba->stable_params_lna_smg != NULL)
 		free(pba->stable_params_lna_smg);
